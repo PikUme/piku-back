@@ -20,7 +20,8 @@ class UserSessionServiceTest {
 	private final AuthenticationTokenPort tokens = mock(AuthenticationTokenPort.class);
 	private final RefreshSessionPort sessions = mock(RefreshSessionPort.class);
 	private final RevokeDevicePushTokenPort pushTokens = mock(RevokeDevicePushTokenPort.class);
-	private final UserSessionService service = new UserSessionService(tokens, sessions, pushTokens);
+	private final com.pikume.back.user.application.port.in.QueryUserAccessUseCase users = mock(com.pikume.back.user.application.port.in.QueryUserAccessUseCase.class);
+    private final UserSessionService service = new UserSessionService(tokens, sessions, pushTokens, users);
 
 	@Test
 	@DisplayName("유효한 저장 갱신 세션으로 Access Token을 재발급한다")
@@ -28,7 +29,8 @@ class UserSessionServiceTest {
 		given(tokens.isTokenValid("refresh")).willReturn(true);
 		given(sessions.loadSessionByRefreshToken("refresh")).willReturn(Optional.of(
 				new RefreshSessionPort.RefreshSession("user-1-device-1", "refresh", "user-1")));
-		given(tokens.generateAccessToken("user-1")).willReturn("new-access");
+		given(users.queryUserAccess("user-1")).willReturn(Optional.of(new com.pikume.back.user.application.dto.UserAccessView("user-1",false,com.pikume.back.user.application.dto.UserAccessProfileStatus.REQUIRED)));
+        given(tokens.generateAccessToken("user-1")).willReturn("new-access");
 
 		assertThat(service.reissueAccessToken("refresh")).isEqualTo("new-access");
 	}
@@ -53,4 +55,13 @@ class UserSessionServiceTest {
 		then(pushTokens).should(never()).revokeDevicePushToken("user-1", "device-b");
 		then(sessions).should().removeSessionByRefreshToken("refresh");
 	}
+    @Test void refusesRefreshAfterWithdrawal() {
+        given(tokens.isTokenValid("refresh")).willReturn(true);
+        given(sessions.loadSessionByRefreshToken("refresh")).willReturn(Optional.of(new RefreshSessionPort.RefreshSession("user-device", "refresh", "user")));
+        given(users.queryUserAccess("user")).willReturn(Optional.of(new com.pikume.back.user.application.dto.UserAccessView("user",true,com.pikume.back.user.application.dto.UserAccessProfileStatus.COMPLETED)));
+        assertThat(service.reissueAccessToken("refresh")).isNull();
+        then(sessions).should().removeSessionByRefreshToken("refresh");
+        then(tokens).should(never()).generateAccessToken("user");
+    }
+
 }

@@ -24,6 +24,13 @@ import com.pikume.back.user.auth.adapter.in.web.dto.request.VerificationEmailReq
 
 import java.util.List;
 import java.util.Map;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import com.pikume.back.user.auth.application.port.in.LegacySignupProofUseCase;
+import com.pikume.back.user.auth.application.port.in.QuerySignupConfigurationUseCase;
+import com.pikume.back.user.auth.application.exception.SignupFlowException;
+import com.pikume.back.user.auth.application.exception.SignupFailure;
+import com.pikume.back.user.auth.domain.vo.VerificationType;
 
 @Tag(name = "Auth", description = "회원가입/이메일 인증 관련 API")
 @RestController
@@ -31,10 +38,12 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class AuthController {
 
-	private final SignUpUseCase signUpUseCase;
+	private final LegacySignupProofUseCase legacySignupProofUseCase;
 	private final VerifyEmailUseCase verifyEmailUseCase;
 	private final ResetPasswordUseCase resetPasswordUseCase;
 	private final QueryAllowedEmailUseCase queryAllowedEmailUseCase;
+	private final QuerySignupConfigurationUseCase signupConfiguration;
+	private final SignupWebCredentials signupCredentials;
 
 	@Operation(summary = "회원가입", description = "이메일, 비밀번호, 닉네임으로 회원가입을 진행합니다.")
 	@ApiResponses(value = {
@@ -42,9 +51,12 @@ public class AuthController {
 			@ApiResponse(responseCode = "400", description = "잘못된 요청")
 	})
 	@PostMapping("/signup")
-	public ResponseEntity<?> signup(@Valid @RequestBody SignupRequest dto) {
-		signUpUseCase.signUp(new SignUpCommand(
-				dto.getEmail(), dto.getPassword(), dto.getNickname(), dto.getFixedCharacterId()));
+	public ResponseEntity<?> signup(@Valid @RequestBody SignupRequest dto, HttpServletRequest request) {
+		requireLegacySignup();
+		signupCredentials.requireOrigin(request);
+		legacySignupProofUseCase.completeLegacy(new SignUpCommand(
+				dto.getEmail(), dto.getPassword(), dto.getNickname(), dto.getFixedCharacterId()),
+				signupCredentials.requireProof(request), signupCredentials.requireBinding(request));
 		return ResponseEntity.status(HttpStatus.CREATED).body(new MessageResponse("회원가입 성공"));
 	}
 
@@ -54,8 +66,12 @@ public class AuthController {
 			@ApiResponse(responseCode = "400", description = "잘못된 요청")
 	})
 	@PostMapping("/send-verification/sign-up")
-	public ResponseEntity<?> sendSignUpVerificationEmail(@Valid @RequestBody VerificationEmailRequest request) {
-		verifyEmailUseCase.sendSignUpVerificationEmail(request.email());
+	public ResponseEntity<?> sendSignUpVerificationEmail(@Valid @RequestBody VerificationEmailRequest body,
+			HttpServletRequest request, HttpServletResponse response) {
+		requireLegacySignup();
+		signupCredentials.requireOrigin(request);
+		signupCredentials.bootstrap(request, response);
+		verifyEmailUseCase.sendSignUpVerificationEmail(body.email());
 		return ResponseEntity.ok(new MessageResponse("회원가입 인증 이메일이 발송되었습니다."));
 	}
 
@@ -72,8 +88,18 @@ public class AuthController {
 
 	@Operation(summary = "이메일 인증 코드 검증", description = "사용자가 입력한 인증 코드를 검증합니다.")
 	@PostMapping("/verify-code")
-	public ResponseEntity<?> verifyCode(@Valid @RequestBody EmailValidRequest dto) {
+	public ResponseEntity<?> verifyCode(@Valid @RequestBody EmailValidRequest dto, HttpServletRequest request, HttpServletResponse response) {
+		String callerBinding = null;
+		if (dto.getType() == VerificationType.SIGN_UP) {
+			requireLegacySignup();
+			signupCredentials.requireOrigin(request);
+			callerBinding = signupCredentials.requireBinding(request);
+		}
 		verifyEmailUseCase.verifyCode(new VerifyEmailCommand(dto.getEmail(), dto.getCode(), dto.getType()));
+		if (callerBinding != null) {
+			var proof = legacySignupProofUseCase.issueLegacyProof(dto.getEmail(), callerBinding);
+			signupCredentials.storeProof(response, proof.proof(), proof.progress().expiresAt());
+		}
 		return ResponseEntity.ok(new MessageResponse("이메일 인증이 완료되었습니다."));
 	}
 
@@ -95,5 +121,11 @@ public class AuthController {
 	@GetMapping("/email-domains")
 	public ResponseEntity<List<String>> getAllowedEmailDomains() {
 		return ResponseEntity.ok(queryAllowedEmailUseCase.queryAllowedEmailDomains());
+	}
+
+	private void requireLegacySignup() {
+		if (!signupConfiguration.querySignupConfiguration().legacySignupEnabled()) {
+			throw new SignupFlowException(SignupFailure.LEGACY_SIGNUP_DISABLED);
+		}
 	}
 }

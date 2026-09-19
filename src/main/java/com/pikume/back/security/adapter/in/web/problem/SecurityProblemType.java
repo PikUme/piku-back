@@ -7,6 +7,7 @@ import org.springframework.http.HttpStatus;
 import java.net.URI;
 
 public enum SecurityProblemType implements ApiProblemType {
+	PROFILE_SETUP_REQUIRED("https://api.pikume.com/problems/signup/profile-setup-required", HttpStatus.FORBIDDEN, "Forbidden"),
 	UNAUTHENTICATED("https://api.pikume.com/problems/security/unauthenticated", HttpStatus.UNAUTHORIZED, "Unauthorized"),
 	INVALID_CREDENTIALS("https://api.pikume.com/problems/security/invalid-credentials", HttpStatus.UNAUTHORIZED, "Unauthorized"),
 	INVALID_REFRESH_TOKEN("https://api.pikume.com/problems/security/invalid-refresh-token", HttpStatus.UNAUTHORIZED, "Unauthorized"),

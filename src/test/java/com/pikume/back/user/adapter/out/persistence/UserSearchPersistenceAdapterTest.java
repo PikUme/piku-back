@@ -47,4 +47,22 @@ class UserSearchPersistenceAdapterTest {
 				.containsExactly(activeUser.getId());
 		assertThat(result.getTotalElements()).isEqualTo(1L);
 	}
+
+	@Test
+	@DisplayName("프로필 설정이 필요한 사용자는 닉네임 검색 결과와 전체 건수에서 제외한다")
+	void excludesPendingUsersFromSearchResultsAndTotalCount() {
+		User completedUser = new User("completed@example.com", "password", "pikume-completed", 1L);
+		User pendingUser = User.pending("pending@example.com", null, "가입대기_search", 1L);
+		userJpaRepository.saveAllAndFlush(List.of(completedUser, pendingUser));
+		entityManager.clear();
+
+		var result = new UserSearchPersistenceAdapter(userJpaRepository)
+				.searchUsers("%", PageQuery.of(0, 20));
+
+		assertThat(result.getContent())
+				.extracting(User::getId)
+				.contains(completedUser.getId())
+				.doesNotContain(pendingUser.getId());
+		assertThat(result.getTotalElements()).isEqualTo(1L);
+	}
 }

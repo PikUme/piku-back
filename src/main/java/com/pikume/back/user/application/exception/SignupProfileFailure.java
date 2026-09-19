@@ -1,0 +1,11 @@
+package com.pikume.back.user.application.exception;
+
+public enum SignupProfileFailure {
+	INVALID_NICKNAME,
+	NICKNAME_UNAVAILABLE,
+	HOLD_REQUIRED,
+	PROFILE_ALREADY_COMPLETED,
+	PROFILE_SETUP_REQUIRED,
+	USER_UNAVAILABLE,
+	INVALID_CHARACTER
+}

@@ -25,6 +25,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("UserProfileQueryService")
@@ -73,6 +74,19 @@ class UserProfileQueryServiceTest {
 		assertThat(result.friendCount()).isEqualTo(5);
 		assertThat(result.diaryCount()).isEqualTo(10L);
 		assertThat(result.friendStatus()).isEqualTo("NONE");
+	}
+
+	@Test
+	@DisplayName("프로필 설정 전 회원은 미리보기와 상세 프로필에 노출하지 않는다")
+	void hidesPendingProfile() {
+		User user = User.pending("pending@test.com", "pw", "가입대기_pending", 1L);
+		given(loadUserForProfilePort.loadProfileUser("pending")).willReturn(Optional.of(user));
+
+		assertThatThrownBy(() -> service.queryProfilePreview("pending", "viewer"))
+				.isInstanceOf(UserNotFoundException.class);
+		assertThatThrownBy(() -> service.queryUserProfile("pending", "viewer"))
+				.isInstanceOf(UserNotFoundException.class);
+		verifyNoInteractions(socialMetricsPort, diaryMetricsPort, resolveAvatarCharacterReferencesPort);
 	}
 
 	@Test

@@ -19,6 +19,10 @@ public class ProblemDetailAccessDeniedHandler implements AccessDeniedHandler {
 	@Override
 	public void handle(HttpServletRequest request, HttpServletResponse response, AccessDeniedException accessDeniedException)
 			throws IOException {
+		if (accessDeniedException instanceof ProfileSetupRequiredException) {
+			problemWriter.write(request, response, SecurityProblemType.PROFILE_SETUP_REQUIRED, accessDeniedException.getMessage());
+			return;
+		}
 		problemWriter.write(
 				request,
 				response,

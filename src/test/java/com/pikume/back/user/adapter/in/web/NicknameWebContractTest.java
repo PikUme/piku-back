@@ -4,7 +4,19 @@ import com.pikume.back.global.error.ProblemDetailFactory;
 import com.pikume.back.global.exception.GlobalExceptionHandler;
 import com.pikume.back.global.port.out.ResolveObjectUrlPort;
 import com.pikume.back.security.principal.UserPrincipal;
-import com.pikume.back.user.adapter.out.memory.InMemoryNicknameHoldAdapter;
+import com.pikume.back.user.adapter.out.persistence.NicknameHoldPersistenceAdapter;
+import com.pikume.back.user.auth.adapter.in.web.SignupWebCredentials;
+import com.pikume.back.user.auth.application.port.in.LegacySignupProofUseCase;
+import com.pikume.back.user.auth.application.port.in.QuerySignupConfigurationUseCase;
+import com.pikume.back.user.auth.application.dto.SignupConfiguration;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.DefaultTransactionDefinition;
+import org.junit.jupiter.api.AfterEach;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import com.pikume.back.user.application.port.in.QueryUserProfileUseCase;
 import com.pikume.back.user.application.port.out.CheckUserUniquenessPort;
 import com.pikume.back.user.application.port.out.LoadUserForPasswordResetPort;
@@ -28,7 +40,6 @@ import com.pikume.back.user.auth.domain.service.EmailVerificationPolicy;
 import com.pikume.back.user.auth.domain.vo.VerificationType;
 import com.pikume.back.user.domain.User;
 import com.pikume.back.user.domain.exception.NicknameAlreadyExistsException;
-import com.pikume.back.user.domain.service.NicknamePolicy;
 import com.pikume.back.user.domain.service.PasswordPolicy;
 import com.pikume.back.user.domain.vo.Nickname;
 import jakarta.validation.constraints.NotNull;
@@ -75,7 +86,10 @@ class NicknameWebContractTest {
 
 	private MockMvc mockMvc;
 	private TestUserAccountStore userAccountStore;
-	private InMemoryNicknameHoldAdapter nicknameHoldAdapter;
+	private NicknameHoldPersistenceAdapter nicknameHoldAdapter;
+	private DataSourceTransactionManager transactionManager;
+	private TransactionStatus transaction;
+	private JdbcTemplate jdbc;
 	private LoadCompletedEmailVerificationPort loadCompletedEmailVerificationPort;
 	private CheckSignUpCharacterSelectionPort checkSignUpCharacterSelectionPort;
 	private PasswordProtectionPort passwordProtectionPort;
@@ -85,7 +99,14 @@ class NicknameWebContractTest {
 	@BeforeEach
 	void setUp() {
 		userAccountStore = new TestUserAccountStore();
-		nicknameHoldAdapter = new InMemoryNicknameHoldAdapter(new NicknamePolicy());
+		var source = new DriverManagerDataSource("jdbc:h2:mem:" + java.util.UUID.randomUUID() + ";DB_CLOSE_DELAY=-1", "sa", "");
+		jdbc = new JdbcTemplate(source);
+		jdbc.execute("CREATE TABLE nickname_write_mutex (id INT PRIMARY KEY)");
+		jdbc.update("INSERT INTO nickname_write_mutex VALUES (1)");
+		jdbc.execute("CREATE TABLE nickname_holds (nickname VARCHAR(255) PRIMARY KEY, user_id VARCHAR(36) NOT NULL UNIQUE, expires_at TIMESTAMP(6) NOT NULL)");
+		transactionManager = new DataSourceTransactionManager(source);
+		transaction = transactionManager.getTransaction(new DefaultTransactionDefinition());
+		nicknameHoldAdapter = new NicknameHoldPersistenceAdapter(jdbc);
 		loadCompletedEmailVerificationPort = mock(LoadCompletedEmailVerificationPort.class);
 		checkSignUpCharacterSelectionPort = mock(CheckSignUpCharacterSelectionPort.class);
 		passwordProtectionPort = mock(PasswordProtectionPort.class);
@@ -106,7 +127,7 @@ class NicknameWebContractTest {
 				checkSignUpCharacterSelectionPort,
 				queryAllowedEmailUseCase,
 				new EmailVerificationPolicy(),
-				new PasswordPolicy());
+				new PasswordPolicy(), nicknameHoldAdapter);
 		UserProfileCommandService profileService = new UserProfileCommandService(
 				userAccountStore,
 				userAccountStore,
@@ -115,11 +136,16 @@ class NicknameWebContractTest {
 				nicknameHoldAdapter);
 
 		ProblemDetailFactory problemDetailFactory = new ProblemDetailFactory();
-		AuthController authController = new AuthController(
-				authService,
-				authService,
-				authService,
-				queryAllowedEmailUseCase);
+		LegacySignupProofUseCase legacyProof = mock(LegacySignupProofUseCase.class);
+		// The proof boundary is a test double; nickname validation still executes the real signup service.
+		doAnswer(call -> { authService.signUp(call.getArgument(0)); return null; })
+				.when(legacyProof).completeLegacy(any(), any(), any());
+		QuerySignupConfigurationUseCase configuration = () -> new SignupConfiguration(false, true);
+		SignupWebCredentials credentials = mock(SignupWebCredentials.class);
+		given(credentials.requireProof(any())).willReturn("proof");
+		given(credentials.requireBinding(any())).willReturn("binding");
+		AuthController authController = new AuthController(legacyProof, authService, authService,
+				queryAllowedEmailUseCase, configuration, credentials);
 		UserController userController = new UserController(
 				mock(QueryUserProfileUseCase.class),
 				profileService,
@@ -136,6 +162,11 @@ class NicknameWebContractTest {
 				.setCustomArgumentResolvers(new AuthenticationPrincipalResolver())
 				.setValidator(validator)
 				.build();
+	}
+
+	@AfterEach void closeDatabase() {
+		transactionManager.rollback(transaction);
+		jdbc.execute("SET DB_CLOSE_DELAY 0");
 	}
 
 	@Nested
@@ -275,6 +306,19 @@ class NicknameWebContractTest {
 	@Nested
 	@DisplayName("PATCH /api/users/profile")
 	class Profile {
+
+		@Test
+		@DisplayName("서버 전용 닉네임은 점유 재시도 대신 입력 오류로 거절한다")
+		void rejectsReservedPrefixBeforeCheckingTheHold() throws Exception {
+			ResultActions result = mockMvc.perform(patch("/api/users/profile")
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("""
+						{"newNickname":"  가입대기_123　 ","characterId":2}
+						"""));
+			assertValidationProblem(result, "유효하지 않은 닉네임입니다.", "/api/users/profile");
+			assertThat(userAccountStore.profileUser().getNickname()).isEqualTo("현재닉");
+			assertThat(userAccountStore.profileUser().getCharacterId()).isEqualTo(1L);
+		}
 
 		@ParameterizedTest(name = "{0}")
 		@MethodSource("invalidNicknames")
@@ -431,6 +475,9 @@ class NicknameWebContractTest {
 		public Optional<User> loadProfileUser(String userId) {
 			return USER_ID.equals(userId) ? Optional.of(profileUser) : Optional.empty();
 		}
+
+		@Override
+		public Optional<User> loadProfileUserForUpdate(String userId) { return loadProfileUser(userId); }
 
 		@Override
 		public User recordUserAccount(User user) {

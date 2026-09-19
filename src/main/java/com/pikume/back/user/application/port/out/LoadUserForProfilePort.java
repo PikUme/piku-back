@@ -7,4 +7,6 @@ import java.util.Optional;
 public interface LoadUserForProfilePort {
 
 	Optional<User> loadProfileUser(String userId);
+
+	Optional<User> loadProfileUserForUpdate(String userId);
 }

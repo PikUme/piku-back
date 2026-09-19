@@ -1,5 +1,6 @@
 package com.pikume.back.user.auth.application.service;
 
+import com.pikume.back.user.domain.vo.Nickname;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -42,6 +43,8 @@ import static org.mockito.Mockito.never;
 @ExtendWith(MockitoExtension.class)
 @DisplayName("AuthService")
 class AuthServiceTest {
+	@Mock
+	private com.pikume.back.user.application.port.out.NicknameHoldPort nicknameHoldPort;
 
 	@InjectMocks
 	private AuthService authService;
@@ -76,6 +79,40 @@ class AuthServiceTest {
 	@Nested
 	@DisplayName("signup")
 	class Signup {
+
+        @Test
+        void rejectsNicknameHeldByAnotherAccountBeforeConsumingEmailProof() {
+            given(nicknameHoldPort.isHeld(org.mockito.ArgumentMatchers.eq(new Nickname("held")), any(java.time.Instant.class)))
+                .willReturn(true);
+            assertThatThrownBy(() -> authService.signUp(new SignUpCommand("test@piku.store", "abc@123", "held", 1L)))
+                .isInstanceOfSatisfying(AuthException.class,
+                    exception -> assertThat(exception.getErrorCode()).isEqualTo(AuthErrorCode.NICKNAME_ALREADY_EXISTS));
+            var order = org.mockito.Mockito.inOrder(nicknameHoldPort, checkUserUniquenessPort);
+            order.verify(nicknameHoldPort).lockNicknameWrites();
+            order.verify(checkUserUniquenessPort).isEmailRegistered("test@piku.store");
+            order.verify(checkUserUniquenessPort).isNicknameInUse(new Nickname("held"));
+            order.verify(nicknameHoldPort).isHeld(org.mockito.ArgumentMatchers.eq(new Nickname("held")), any(java.time.Instant.class));
+            then(recordCompletedEmailVerificationPort).shouldHaveNoInteractions();
+            then(recordUserAccountPort).shouldHaveNoInteractions();
+        }
+
+        @Test
+        void rejectsReservedNicknamePrefix() {
+            assertThatThrownBy(() -> authService.signUp(new SignUpCommand("test@piku.store", "abc@123", "가입대기_123", 1L)))
+                .isInstanceOfSatisfying(AuthException.class,
+                    exception -> assertThat(exception.getErrorCode()).isEqualTo(AuthErrorCode.NICKNAME_ALREADY_EXISTS));
+            then(recordUserAccountPort).shouldHaveNoInteractions();
+        }
+
+        @Test
+        void rejectsNicknameAlreadyWrittenBeforeConsumingEmailProof() {
+            given(checkUserUniquenessPort.isNicknameInUse(new Nickname("used"))).willReturn(true);
+            assertThatThrownBy(() -> authService.signUp(new SignUpCommand("test@piku.store", "abc@123", "used", 1L)))
+                .isInstanceOfSatisfying(AuthException.class,
+                    exception -> assertThat(exception.getErrorCode()).isEqualTo(AuthErrorCode.NICKNAME_ALREADY_EXISTS));
+            then(recordCompletedEmailVerificationPort).shouldHaveNoInteractions();
+        }
+
 
 		@Test
 		@DisplayName("유효하지 않은 닉네임은 다른 Port를 호출하기 전에 거절한다")

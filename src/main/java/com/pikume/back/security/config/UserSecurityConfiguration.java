@@ -1,6 +1,7 @@
 package com.pikume.back.security.config;
 
 import com.pikume.back.security.adapter.in.web.BearerTokenAuthenticationFilter;
+import com.pikume.back.security.adapter.in.web.CompletedProfileAuthorizationManager;
 import com.pikume.back.security.adapter.in.web.ProblemDetailAccessDeniedHandler;
 import com.pikume.back.security.adapter.in.web.ProblemDetailAuthenticationEntryPoint;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +33,7 @@ public class UserSecurityConfiguration {
 	private final CorsConfigurationSource corsConfigurationSource;
 	private final ProblemDetailAuthenticationEntryPoint authenticationEntryPoint;
 	private final ProblemDetailAccessDeniedHandler accessDeniedHandler;
+	private final CompletedProfileAuthorizationManager completedProfileAuthorizationManager;
 
 	@Value("${monitoring.allowed-ips:}")
 	private String allowedIps;
@@ -49,9 +51,16 @@ public class UserSecurityConfiguration {
 				"/api/auth/password-reset",
 				"/api/auth/email",
 				"/api/auth/email-domains",
-				"/api/mobile/auth/**",
+				"/api/mobile/auth/login",
+				"/api/mobile/auth/reissue",
+				"/api/mobile/auth/logout",
 				"/api/characters/fixed",
 				"/api/search"));
+		for (String base : List.of("/api/auth", "/api/mobile/auth")) {
+			for (String action : List.of("progress", "agreements", "email/code", "email", "social/email")) {
+				permittedPaths.add(base + "/signup/" + action);
+			}
+		}
 
 		if (Arrays.asList(environment.getActiveProfiles()).contains("dev")) {
 			permittedPaths.addAll(Arrays.asList(
@@ -73,8 +82,9 @@ public class UserSecurityConfiguration {
 								new AuthorizationDecision(isMonitoringRequestAllowed(context.getRequest())))
 						.requestMatchers(permittedPaths.toArray(new String[0]))
 						.permitAll()
-						.requestMatchers("/api/auth/me").authenticated()
-						.requestMatchers("/api/diary/ai/**").authenticated()
+						.requestMatchers("/api/auth/me", "/api/auth/logout", "/api/auth/signup/nickname", "/api/auth/signup/profile",
+								"/api/mobile/auth/me", "/api/mobile/auth/signup/nickname", "/api/mobile/auth/signup/profile").authenticated()
+						.requestMatchers("/api/diary/ai/**").access(completedProfileAuthorizationManager)
 						.requestMatchers(HttpMethod.GET,
 								"/api/diary",
 								"/api/diary/**",
@@ -82,7 +92,7 @@ public class UserSecurityConfiguration {
 								"/api/comments/*/replies",
 								"/api/users/{userId}/profile-preview")
 						.permitAll()
-						.anyRequest().authenticated())
+						.anyRequest().access(completedProfileAuthorizationManager))
 				.sessionManagement(session ->
 						session.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
 

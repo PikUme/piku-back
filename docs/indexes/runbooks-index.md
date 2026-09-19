@@ -3,13 +3,15 @@
 - Status: Active
 - Audience: Engineers
 - Source of Truth: Yes
-- Last Reviewed: 2026-08-11
+- Last Reviewed: 2026-09-07
 
 ## 목적
 
 이 문서는 `docs/runbooks/` 아래의 장애 대응 및 운영 절차서를 찾기 위한 색인이다.
 
 ## Active Documents
+
+- [챕터형 회원가입 전환 운영](../runbooks/chapter-signup-rollout.md): 가입 활성화, 스키마·클라이언트 전환과 장애 대응
 
 - [Admin Session Store Runbook](../runbooks/admin-session-store-runbook.md): 관리자 세션 Redis·DB 장애와 전체 세션 폐기 대응 절차
 - [Documentation Maintenance Runbook](../runbooks/documentation-maintenance-runbook.md): 문서 추가/수정/삭제/검증 절차

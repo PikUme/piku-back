@@ -17,6 +17,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("UserReferenceQueryService")
@@ -26,6 +27,19 @@ class UserReferenceQueryServiceTest {
 	private LoadUserReferencePort loadUserReferencePort;
 	@Mock
 	private ResolveAvatarCharacterReferencesPort resolveAvatarCharacterReferencesPort;
+
+	@Test
+	@DisplayName("프로필 설정 전 회원은 다른 Context의 공개 참조 대상에서 제외한다")
+	void hidesPendingReference() {
+		User user = User.pending("pending@test.com", "pw", "가입대기_pending", 1L);
+		given(loadUserReferencePort.loadReference("pending")).willReturn(Optional.of(user));
+		var service = new UserReferenceQueryService(
+				loadUserReferencePort,
+				new UserAvatarReferenceResolver(resolveAvatarCharacterReferencesPort));
+
+		assertThat(service.queryUserReference("pending")).isEmpty();
+		verifyNoInteractions(resolveAvatarCharacterReferencesPort);
+	}
 
 	@Test
 	@DisplayName("사용자 Aggregate를 외부 Context용 공개 참조 View로 변환한다")
