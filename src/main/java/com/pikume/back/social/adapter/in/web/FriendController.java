@@ -10,7 +10,6 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springdoc.core.annotations.ParameterObject;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
@@ -22,6 +21,8 @@ import com.pikume.back.security.principal.UserPrincipal;
 import com.pikume.back.global.pagination.PageQuery;
 import com.pikume.back.global.pagination.PageResult;
 import com.pikume.back.global.pagination.SpringPageMapper;
+import com.pikume.back.global.adapter.in.web.pagination.OffsetPageResponse;
+import com.pikume.back.global.adapter.in.web.pagination.OffsetPageResponseMapper;
 import com.pikume.back.social.application.dto.FriendRemovalResult;
 import com.pikume.back.social.application.dto.FriendRequestResult;
 import com.pikume.back.social.application.dto.FriendSummaryResult;
@@ -71,7 +72,7 @@ public class FriendController {
 	@Operation(summary = "친구 목록 조회", description = "친구들의 id,닉네임,아바타(프로필)을 반환합니다.")
 	@ApiResponse(responseCode = "200", description = "친구 목록 반환")
 	@GetMapping
-	public ResponseEntity<Page<FriendsDTO>> findFriendList(
+	public ResponseEntity<OffsetPageResponse<FriendsDTO>> findFriendList(
 			@ParameterObject @PageableDefault(sort = "userId1", direction = Sort.Direction.DESC) Pageable pageable,
 			@AuthenticationPrincipal UserPrincipal userPrincipal) {
 		log.info("{} 의 친구 목록 조회 요청", userPrincipal.getId());
@@ -79,7 +80,7 @@ public class FriendController {
 		PageQuery pageQuery = SpringPageMapper.toPageQuery(pageable);
 		PageResult<FriendsDTO> friendResults = queryFriendPageUseCase.queryFriendPage(pageQuery, userPrincipal.getId())
 				.map(this::toFriendsDto);
-		Page<FriendsDTO> friends = SpringPageMapper.toSpringPage(friendResults, pageable);
+		OffsetPageResponse<FriendsDTO> friends = OffsetPageResponseMapper.toResponse(friendResults, pageable);
 
 		return ResponseEntity.ok(friends);
 	}
@@ -89,7 +90,7 @@ public class FriendController {
 			@ApiResponse(responseCode = "401", description = "인증되지 않은 사용자", content = @Content)
 	})
 	@GetMapping("/requests")
-	public ResponseEntity<Page<FriendsDTO>> findFriendRequests(
+	public ResponseEntity<OffsetPageResponse<FriendsDTO>> findFriendRequests(
 			@ParameterObject @PageableDefault Pageable pageable,
 			@AuthenticationPrincipal UserPrincipal userPrincipal) {
 		log.info("{} 의 받은 친구 요청 목록 조회", userPrincipal.getId());
@@ -98,7 +99,7 @@ public class FriendController {
 		PageResult<FriendsDTO> requestResults = queryFriendPageUseCase
 				.queryReceivedFriendRequestPage(pageQuery, userPrincipal.getId())
 				.map(this::toFriendsDto);
-		Page<FriendsDTO> requests = SpringPageMapper.toSpringPage(requestResults, pageable);
+		OffsetPageResponse<FriendsDTO> requests = OffsetPageResponseMapper.toResponse(requestResults, pageable);
 
 		return ResponseEntity.ok(requests);
 	}
