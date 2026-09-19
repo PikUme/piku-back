@@ -4,7 +4,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
 import com.pikume.back.user.application.dto.UpdateProfileCommand;
 import com.pikume.back.user.application.dto.UpdateProfileFailureReason;
 import com.pikume.back.user.application.dto.UpdateProfileResult;
@@ -19,6 +18,7 @@ import com.pikume.back.user.application.port.out.LoadUserForProfilePort;
 import com.pikume.back.user.application.port.out.NicknameHoldPort;
 import com.pikume.back.user.application.port.out.RecordUserAccountPort;
 import com.pikume.back.user.domain.User;
+import com.pikume.back.user.domain.vo.Nickname;
 
 import java.time.Instant;
 
@@ -39,32 +39,36 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 
 	@Override
 	public boolean reserveIfAvailable(String nickname, String userId) {
+		Nickname requestedNickname = new Nickname(nickname);
 		User user = loadUserForProfilePort.loadProfileUser(userId)
 				.orElseThrow(UserNotFoundException::new);
-		if (nickname.equals(user.getNickname()))
+		if (requestedNickname.value().equals(user.getNickname()))
 			return true;
 
-		if (checkUserUniquenessPort.isNicknameInUse(nickname))
+		if (checkUserUniquenessPort.isNicknameInUse(requestedNickname))
 			return false;
 
-		return nicknameHoldPort.tryAcquire(nickname, userId, Instant.now());
+		return nicknameHoldPort.tryAcquire(requestedNickname, userId, Instant.now());
 	}
 
 	@Override
 	@Transactional
 	public UpdateProfileResult updateProfile(UpdateProfileCommand command) {
-		if ((!StringUtils.hasText(command.newNickname())) && (command.characterId() == null)) {
+		if (command.newNickname() == null && command.characterId() == null) {
 			return UpdateProfileResult.failure(UpdateProfileFailureReason.INVALID_REQUEST, "변경할 닉네임이나 캐릭터 정보가 없습니다.", null);
 		}
+		Nickname requestedNickname = command.newNickname() == null ? null : new Nickname(command.newNickname());
 
 		User user = loadUserForProfilePort.loadProfileUser(command.userId())
 				.orElseThrow(UserNotFoundException::new);
 		String oldNickname = user.getNickname();
 		Long oldCharacterId = user.getCharacterId();
 
-		String targetNickname;
+		boolean nicknameChanged = requestedNickname != null && !requestedNickname.value().equals(oldNickname);
 		try {
-			targetNickname = getValidatedNewNickname(command.userId(), command.newNickname(), oldNickname);
+			if (nicknameChanged) {
+				validateNicknameChange(command.userId(), requestedNickname);
+			}
 		} catch (UpdateProfileFailureException e) {
 			return UpdateProfileResult.failure(e.getReason(), e.getMessage(), oldNickname);
 		}
@@ -80,7 +84,6 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 			return UpdateProfileResult.failure(e.getReason(), e.getMessage(), oldNickname);
 		}
 
-		boolean nicknameChanged = !targetNickname.equals(oldNickname);
 		boolean characterChanged = !targetCharacterId.equals(oldCharacterId);
 
 		if (!nicknameChanged && !characterChanged) {
@@ -88,17 +91,17 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 		}
 
 		if (nicknameChanged) {
-			user.changeNickname(targetNickname);
+			user.changeNickname(requestedNickname);
 		}
 		if (characterChanged) {
 			user.changeCharacter(targetCharacterId);
 		}
 		recordUserAccountPort.recordUserAccount(user);
 		if (nicknameChanged) {
-			nicknameHoldPort.release(targetNickname, command.userId());
+			nicknameHoldPort.release(requestedNickname, command.userId());
 		}
 
-		return buildSuccessResult(nicknameChanged, characterChanged, targetNickname, targetAvatarReference);
+		return buildSuccessResult(nicknameChanged, characterChanged, user.getNickname(), targetAvatarReference);
 	}
 
 	@Override
@@ -117,22 +120,17 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 		recordUserAccountPort.recordUserAccount(user);
 	}
 
-	private String getValidatedNewNickname(String userId, String newNickname, String oldNickname) {
-		if (newNickname == null || newNickname.isEmpty() || newNickname.equals(oldNickname)) {
-			return oldNickname;
-		}
-
-		if (!nicknameHoldPort.isHeldBy(newNickname, userId, Instant.now())) {
+	private void validateNicknameChange(String userId, Nickname requestedNickname) {
+		if (!nicknameHoldPort.isHeldBy(requestedNickname, userId, Instant.now())) {
 			throw new UpdateProfileFailureException(
 					UpdateProfileFailureReason.PROFILE_CONFLICT,
 					"닉네임 점유 정보가 없거나 만료되었거나 본인이 아닙니다.");
 		}
-		if (checkUserUniquenessPort.isNicknameInUse(newNickname)) {
+		if (checkUserUniquenessPort.isNicknameInUse(requestedNickname)) {
 			throw new UpdateProfileFailureException(
 					UpdateProfileFailureReason.NICKNAME_CONFLICT,
 					"이미 사용 중인 닉네임입니다.");
 		}
-		return newNickname;
 	}
 
 	private String resolveFixedCharacterReference(Long characterId) {

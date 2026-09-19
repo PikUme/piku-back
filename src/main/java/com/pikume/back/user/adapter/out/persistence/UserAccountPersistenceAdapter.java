@@ -53,8 +53,8 @@ public class UserAccountPersistenceAdapter implements LoadUserForProfilePort, Lo
 	}
 
 	@Override
-	public boolean isNicknameInUse(String nickname) {
-		return jpaRepository.existsByNickname(new Nickname(nickname));
+	public boolean isNicknameInUse(Nickname nickname) {
+		return jpaRepository.existsByNickname(nickname);
 	}
 
 	@Override

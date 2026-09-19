@@ -24,6 +24,7 @@ import com.pikume.back.user.auth.application.exception.AuthErrorCode;
 import com.pikume.back.user.auth.application.exception.AuthException;
 import com.pikume.back.user.domain.User;
 import com.pikume.back.user.domain.exception.EmailAlreadyExistsException;
+import com.pikume.back.user.domain.exception.InvalidNicknameException;
 import com.pikume.back.user.domain.service.PasswordPolicy;
 
 import java.lang.reflect.Field;
@@ -77,6 +78,19 @@ class AuthServiceTest {
 	class Signup {
 
 		@Test
+		@DisplayName("유효하지 않은 닉네임은 다른 Port를 호출하기 전에 거절한다")
+		void rejectsInvalidNicknameBeforeCallingPorts() {
+			SignUpCommand command = new SignUpCommand("test@piku.store", "abc@123", " \u2003\u3000 ", 1L);
+
+			assertThatThrownBy(() -> authService.signUp(command))
+					.isInstanceOf(InvalidNicknameException.class);
+
+			then(checkUserUniquenessPort).shouldHaveNoInteractions();
+			then(loadCompletedEmailVerificationPort).shouldHaveNoInteractions();
+			then(recordUserAccountPort).shouldHaveNoInteractions();
+		}
+
+		@Test
 		@DisplayName("잘못된 이메일 형식을 계정 오류로 변환하고 Port를 호출하지 않는다")
 		void rejectsInvalidEmailBeforeCallingPorts() {
 			SignUpCommand command = new SignUpCommand("not-an-email", "abc@123", "테스트", 1L);
@@ -108,7 +122,7 @@ class AuthServiceTest {
 		@Test
 		@DisplayName("유효한 요청으로 회원가입에 성공한다")
 		void signupSuccess() throws Exception {
-			SignUpCommand dto = new SignUpCommand("test@piku.store", "abc@123", "테스트", 1L);
+			SignUpCommand dto = new SignUpCommand("test@piku.store", "abc@123", " \u2003테스트\u3000 ", 1L);
 
 			given(checkUserUniquenessPort.isEmailRegistered("test@piku.store")).willReturn(false);
 
@@ -127,7 +141,7 @@ class AuthServiceTest {
 			authService.signUp(dto);
 
 			then(recordUserAccountPort).should().recordUserAccount(argThat(user ->
-					Long.valueOf(1L).equals(user.getCharacterId())));
+					Long.valueOf(1L).equals(user.getCharacterId()) && "테스트".equals(user.getNickname())));
 			then(recordCompletedEmailVerificationPort).should().recordCompletedVerification(verified);
 		}
 

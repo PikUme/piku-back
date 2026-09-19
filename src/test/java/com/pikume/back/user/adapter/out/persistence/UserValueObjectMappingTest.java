@@ -4,6 +4,7 @@ import com.pikume.back.user.domain.User;
 import com.pikume.back.global.pagination.PageQuery;
 import com.pikume.back.user.domain.exception.NicknameAlreadyExistsException;
 import com.pikume.back.user.domain.exception.EmailAlreadyExistsException;
+import com.pikume.back.user.domain.vo.Nickname;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -35,7 +36,7 @@ class UserValueObjectMappingTest {
 		User saved = userJpaRepository.saveAndFlush(new User(
 				"user@example.com",
 				"password-hash",
-				"pikume",
+				" \u2003pikume\u3000 ",
 				1L));
 		entityManager.clear();
 
@@ -67,7 +68,7 @@ class UserValueObjectMappingTest {
 
 		assertThat(accountAdapter.loadForLogin("user@example.com")).isPresent();
 		assertThat(accountAdapter.isEmailRegistered("user@example.com")).isTrue();
-		assertThat(accountAdapter.isNicknameInUse("pikume-user")).isTrue();
+		assertThat(accountAdapter.isNicknameInUse(new Nickname(" \u2003pikume-user\u3000 "))).isTrue();
 		assertThat(searchAdapter.searchUsers("%pikume%", PageQuery.of(0, 20)).getContent())
 				.singleElement()
 				.satisfies(user -> assertThat(user.getNickname()).isEqualTo("pikume-user"));
@@ -77,7 +78,7 @@ class UserValueObjectMappingTest {
 	@DisplayName("실제 nickname 유일 제약 위반을 User 충돌 의미로 번역한다")
 	void translatesNicknameConstraintViolationAtPersistenceBoundary() {
 		userJpaRepository.saveAndFlush(new User(
-				"first@example.com", "password", "duplicate-nickname", 1L));
+				"first@example.com", "password", " \u2003duplicate-nickname\u3000 ", 1L));
 		User duplicate = new User(
 				"second@example.com", "password", "duplicate-nickname", 1L);
 

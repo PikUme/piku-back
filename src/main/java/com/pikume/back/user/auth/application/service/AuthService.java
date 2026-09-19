@@ -30,6 +30,7 @@ import com.pikume.back.user.domain.exception.InvalidPasswordException;
 import com.pikume.back.user.domain.exception.NicknameAlreadyExistsException;
 import com.pikume.back.user.domain.service.PasswordPolicy;
 import com.pikume.back.user.domain.vo.Email;
+import com.pikume.back.user.domain.vo.Nickname;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -59,6 +60,7 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 	@Override
 	@Transactional
 	public void signUp(SignUpCommand command) {
+		Nickname nickname = new Nickname(command.nickname());
 		requireValidEmail(command.email());
 		requireValidPassword(command.password());
 		if (checkUserUniquenessPort.isEmailRegistered(command.email())) {
@@ -70,7 +72,7 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 		User user = new User(
 				command.email(),
 				passwordProtectionPort.protect(command.password()),
-				command.nickname(),
+				nickname,
 				command.fixedCharacterId());
 
 		verified.markUsed();

@@ -1,6 +1,7 @@
 package com.pikume.back.user.adapter.out.memory;
 
 import com.pikume.back.user.domain.service.NicknamePolicy;
+import com.pikume.back.user.domain.vo.Nickname;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -23,39 +24,48 @@ class InMemoryNicknameHoldAdapterTest {
 	@Test
 	@DisplayName("동일 사용자는 만료 전 점유를 다시 획득할 수 있다")
 	void sameUserCanReacquire() {
-		assertThat(adapter.tryAcquire("pikume", "user-1", requestedAt)).isTrue();
+		assertThat(adapter.tryAcquire(new Nickname("pikume"), "user-1", requestedAt)).isTrue();
 
-		assertThat(adapter.tryAcquire("pikume", "user-1", requestedAt.plusSeconds(60))).isTrue();
-		assertThat(adapter.isHeldBy("pikume", "user-1", requestedAt.plusSeconds(179))).isTrue();
+		assertThat(adapter.tryAcquire(new Nickname("pikume"), "user-1", requestedAt.plusSeconds(60))).isTrue();
+		assertThat(adapter.isHeldBy(new Nickname("pikume"), "user-1", requestedAt.plusSeconds(179))).isTrue();
 	}
 
 	@Test
 	@DisplayName("다른 사용자는 만료 전 점유를 획득할 수 없다")
 	void otherUserCannotAcquireActiveHold() {
-		adapter.tryAcquire("pikume", "user-1", requestedAt);
+		adapter.tryAcquire(new Nickname("pikume"), "user-1", requestedAt);
 
-		assertThat(adapter.tryAcquire("pikume", "user-2", requestedAt.plusSeconds(60))).isFalse();
+		assertThat(adapter.tryAcquire(new Nickname("pikume"), "user-2", requestedAt.plusSeconds(60))).isFalse();
 	}
 
 	@Test
 	@DisplayName("만료된 점유는 다른 사용자가 교체할 수 있다")
 	void expiredHoldCanBeReplaced() {
-		adapter.tryAcquire("pikume", "user-1", requestedAt);
+		adapter.tryAcquire(new Nickname("pikume"), "user-1", requestedAt);
 
-		assertThat(adapter.tryAcquire("pikume", "user-2", requestedAt.plusSeconds(181))).isTrue();
-		assertThat(adapter.isHeldBy("pikume", "user-2", requestedAt.plusSeconds(181))).isTrue();
+		assertThat(adapter.tryAcquire(new Nickname("pikume"), "user-2", requestedAt.plusSeconds(181))).isTrue();
+		assertThat(adapter.isHeldBy(new Nickname("pikume"), "user-2", requestedAt.plusSeconds(181))).isTrue();
 	}
 
 	@Test
 	@DisplayName("점유 소유자만 점유를 해제할 수 있다")
 	void onlyOwnerCanReleaseHold() {
-		adapter.tryAcquire("pikume", "user-1", requestedAt);
+		adapter.tryAcquire(new Nickname("pikume"), "user-1", requestedAt);
 
-		adapter.release("pikume", "user-2");
-		assertThat(adapter.isHeldBy("pikume", "user-1", requestedAt.plusSeconds(1))).isTrue();
+		adapter.release(new Nickname("pikume"), "user-2");
+		assertThat(adapter.isHeldBy(new Nickname("pikume"), "user-1", requestedAt.plusSeconds(1))).isTrue();
 
-		adapter.release("pikume", "user-1");
-		assertThat(adapter.isHeldBy("pikume", "user-1", requestedAt.plusSeconds(1))).isFalse();
+		adapter.release(new Nickname("pikume"), "user-1");
+		assertThat(adapter.isHeldBy(new Nickname("pikume"), "user-1", requestedAt.plusSeconds(1))).isFalse();
+	}
+
+	@Test
+	@DisplayName("공백 형태가 다른 동일 닉네임은 한 사용자만 점유한다")
+	void whitespaceVariantsHaveSingleOwner() {
+		assertThat(adapter.tryAcquire(new Nickname(" \u2003pikume\u3000 "), "user-1", requestedAt)).isTrue();
+
+		assertThat(adapter.tryAcquire(new Nickname("pikume"), "user-2", requestedAt.plusSeconds(60))).isFalse();
+		assertThat(adapter.isHeldBy(new Nickname(" pikume "), "user-1", requestedAt.plusSeconds(60))).isTrue();
 	}
 
 	@Test
@@ -70,7 +80,7 @@ class InMemoryNicknameHoldAdapterTest {
 					.mapToObj(index -> (Callable<Boolean>) () -> {
 						ready.countDown();
 						start.await();
-						return adapter.tryAcquire("pikume", "user-" + index, requestedAt);
+						return adapter.tryAcquire(new Nickname("pikume"), "user-" + index, requestedAt);
 					})
 					.toList();
 			var futures = requests.stream().map(executor::submit).toList();

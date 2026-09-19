@@ -15,6 +15,7 @@ import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
 import com.pikume.back.global.dto.MessageResponse;
 import com.pikume.back.global.error.ProblemDetailFactory;
 import com.pikume.back.global.exception.GlobalExceptionHandler;
+import com.pikume.back.user.adapter.in.web.UserExceptionHandler;
 import com.pikume.back.user.auth.application.port.in.ResetPasswordUseCase;
 import com.pikume.back.user.auth.application.port.in.SignUpUseCase;
 import com.pikume.back.user.auth.application.port.in.VerifyEmailUseCase;
@@ -75,7 +76,8 @@ class AuthControllerTest {
 		mockMvc = MockMvcBuilders.standaloneSetup(authController)
 				.setControllerAdvice(
 						new GlobalExceptionHandler(Optional.empty(), problemDetailFactory),
-						new AuthExceptionHandler(problemDetailFactory))
+						new AuthExceptionHandler(problemDetailFactory),
+						new UserExceptionHandler(problemDetailFactory))
 				.setValidator(validator)
 				.build();
 	}
@@ -319,18 +321,17 @@ class AuthControllerTest {
 	}
 
 	@Test
-	@DisplayName("POST /api/auth/signup은 20자를 초과한 닉네임을 validation Problem Details로 거부한다")
-	void signupRejectsTooLongNickname() throws Exception {
-		SignupRequest request = new SignupRequest("user@example.com", "abc@123", "123456789012345678901", 1L);
+	@DisplayName("POST /api/auth/signup은 닉네임 원문의 길이 검증을 Use Case에 위임한다")
+	void signupDelegatesRawNicknameValidation() throws Exception {
+		SignupRequest request = new SignupRequest("user@example.com", "abc@123", " 12345678901234567890 ", 1L);
 
 		mockMvc.perform(post("/api/auth/signup")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content(objectMapper.writeValueAsString(request)))
-				.andExpect(status().isBadRequest())
-				.andExpect(jsonPath("$.status").value(400))
-				.andExpect(jsonPath("$.fieldErrors.nickname").exists());
+				.andExpect(status().isCreated());
 
-		then(signUpUseCase).shouldHaveNoInteractions();
+		then(signUpUseCase).should().signUp(
+				new SignUpCommand("user@example.com", "abc@123", " 12345678901234567890 ", 1L));
 	}
 
 	@Test

@@ -7,10 +7,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import com.pikume.back.global.error.ProblemDetailFactory;
+import com.pikume.back.global.error.ValidationProblemType;
 import com.pikume.back.user.adapter.in.web.problem.UserProblemType;
 import com.pikume.back.user.application.exception.UserException;
 import com.pikume.back.user.application.exception.ProfileImageNotFoundException;
 import com.pikume.back.user.domain.exception.NicknameAlreadyExistsException;
+import com.pikume.back.user.domain.exception.InvalidNicknameException;
 import com.pikume.back.global.error.CommonProblemType;
 
 @RestControllerAdvice
@@ -37,6 +39,16 @@ public class UserExceptionHandler {
 				"이미 사용 중인 닉네임입니다.",
 				request.getRequestURI());
 		return ResponseEntity.status(UserProblemType.NICKNAME_CONFLICT.status()).body(detail);
+	}
+
+	@ExceptionHandler(InvalidNicknameException.class)
+	public ResponseEntity<ProblemDetail> handleInvalidNickname(
+			InvalidNicknameException exception, HttpServletRequest request) {
+		ProblemDetail detail = problemDetailFactory.create(
+				ValidationProblemType.INVALID_REQUEST,
+				exception.getMessage(),
+				request.getRequestURI());
+		return ResponseEntity.status(ValidationProblemType.INVALID_REQUEST.status()).body(detail);
 	}
 
 	@ExceptionHandler(ProfileImageNotFoundException.class)

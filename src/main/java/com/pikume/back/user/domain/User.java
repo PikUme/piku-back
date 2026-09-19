@@ -5,6 +5,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import com.pikume.back.global.entity.BaseEntity;
+import com.pikume.back.user.domain.exception.InvalidNicknameException;
 import com.pikume.back.user.domain.vo.Email;
 import com.pikume.back.user.domain.vo.Nickname;
 import java.time.LocalDateTime;
@@ -40,9 +41,13 @@ public class User extends BaseEntity {
 	private LocalDateTime deletedAt;
 
 	public User(String email, String password, String nickname, Long characterId) {
+		this(email, password, new Nickname(nickname), characterId);
+	}
+
+	public User(String email, String password, Nickname nickname, Long characterId) {
 		this.email = new Email(email);
 		this.password = password;
-		this.nickname = new Nickname(nickname);
+		this.nickname = requireNickname(nickname);
 		this.characterId = requireCharacterId(characterId);
 	}
 
@@ -60,7 +65,11 @@ public class User extends BaseEntity {
 	 * @param newNickname 변경할 닉네임
 	 */
 	public void changeNickname(String newNickname) {
-		this.nickname = new Nickname(newNickname);
+		changeNickname(new Nickname(newNickname));
+	}
+
+	public void changeNickname(Nickname newNickname) {
+		this.nickname = requireNickname(newNickname);
 	}
 
 	public void changeCharacter(Long characterId) {
@@ -80,6 +89,13 @@ public class User extends BaseEntity {
 			throw new IllegalArgumentException("캐릭터 식별자는 양수여야 합니다.");
 		}
 		return characterId;
+	}
+
+	private Nickname requireNickname(Nickname nickname) {
+		if (nickname == null) {
+			throw new InvalidNicknameException("닉네임은 필수 값입니다.");
+		}
+		return nickname;
 	}
 
 	/**

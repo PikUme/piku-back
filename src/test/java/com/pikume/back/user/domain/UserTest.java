@@ -2,6 +2,7 @@ package com.pikume.back.user.domain;
 
 import com.pikume.back.user.domain.vo.Email;
 import com.pikume.back.user.domain.vo.Nickname;
+import com.pikume.back.user.domain.exception.InvalidNicknameException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -72,6 +73,40 @@ class UserTest {
 
 		assertThat(user.getNickname()).isEqualTo("new-nickname");
 		assertThat(user.getCharacterId()).isEqualTo(2L);
+	}
+
+	@Test
+	@DisplayName("검증된 닉네임 값 객체로 사용자를 생성한다")
+	void createsUserWithValidatedNickname() {
+		User user = new User("user@example.com", "password", new Nickname(" \u2003피쿠\u3000 "), 1L);
+
+		assertThat(user.getNickname()).isEqualTo("피쿠");
+	}
+
+	@Test
+	@DisplayName("닉네임 값 객체 없이 사용자를 생성할 수 없다")
+	void rejectsMissingValidatedNickname() {
+		assertThatThrownBy(() -> new User("user@example.com", "password", (Nickname) null, 1L))
+				.isInstanceOf(InvalidNicknameException.class);
+	}
+
+	@Test
+	@DisplayName("검증된 닉네임 값 객체로 닉네임을 변경한다")
+	void changesNicknameWithValidatedNickname() {
+		User user = new User("user@example.com", "password", "nickname", 1L);
+
+		user.changeNickname(new Nickname(" \u2003새닉\u3000 "));
+
+		assertThat(user.getNickname()).isEqualTo("새닉");
+	}
+
+	@Test
+	@DisplayName("닉네임 값 객체 없이 닉네임을 변경할 수 없다")
+	void rejectsMissingValidatedNicknameChange() {
+		User user = new User("user@example.com", "password", "nickname", 1L);
+
+		assertThatThrownBy(() -> user.changeNickname((Nickname) null))
+				.isInstanceOf(InvalidNicknameException.class);
 	}
 
 	@Test

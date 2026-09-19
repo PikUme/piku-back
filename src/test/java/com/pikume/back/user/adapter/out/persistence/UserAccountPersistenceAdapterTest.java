@@ -2,6 +2,7 @@ package com.pikume.back.user.adapter.out.persistence;
 
 import com.pikume.back.user.domain.User;
 import com.pikume.back.user.domain.vo.Email;
+import com.pikume.back.user.domain.vo.Nickname;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -58,6 +59,18 @@ class UserAccountPersistenceAdapterTest {
 		assertThat(adapter.loadPasswordResetUser("user@example.com")).contains(user);
 
 		then(userJpaRepository).should().findByEmail(email);
+	}
+
+	@Test
+	@DisplayName("닉네임 사용 여부 조회에 정규화된 값 객체를 전달한다")
+	void checksNicknameUsageWithNormalizedValueObject() {
+		Nickname nickname = new Nickname(" \u2003pikume\u3000 ");
+		given(userJpaRepository.existsByNickname(nickname)).willReturn(true);
+		UserAccountPersistenceAdapter adapter = new UserAccountPersistenceAdapter(userJpaRepository);
+
+		assertThat(adapter.isNicknameInUse(nickname)).isTrue();
+
+		then(userJpaRepository).should().existsByNickname(new Nickname("pikume"));
 	}
 
 	@Test

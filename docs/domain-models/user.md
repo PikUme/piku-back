@@ -3,7 +3,7 @@
 - Status: Active
 - Audience: Engineers
 - Source of Truth: Yes
-- Last Reviewed: 2026-08-11
+- Last Reviewed: 2026-09-08
 
 ## 도메인 개요
 
@@ -14,7 +14,7 @@ User 도메인은 **서비스를 이용하는 일반 사용자의 계정 생명�
 - 서비스 내의 일반 사용자를 고유하게 식별하고 인증할 수 있는 계정 기반을 제공한다.
 - 회원가입, 이메일 검증과 비밀번호 재설정의 일관된 계정 생명주기를 보장한다.
 - 닉네임과 선택된 아바타 캐릭터 식별자의 변경 규칙을 도메인 객체(`User`) 내에 캡슐화하여 일관성을 보장한다.
-- 닉네임 형식(1~20자), 이메일 형식 등 값 객체(Value Object)를 통해 입력 데이터의 정합성을 강력하게 보장한다.
+- 앞뒤 공백을 제거한 닉네임의 길이(1~20자), 이메일 형식 등 값 객체(Value Object)를 통해 입력 데이터의 정합성을 보장한다.
 
 ### 핵심 책임
 
@@ -70,7 +70,8 @@ _Entity_
 
 ### 행위
 
-- `changeNickname(String newNickname)` : 닉네임을 변경한다.
+- `changeNickname(String newNickname)` : 입력을 `Nickname` 값 객체로 변환하여 닉네임을 변경한다.
+- `changeNickname(Nickname newNickname)` : 검증된 `Nickname` 값 객체로 닉네임을 변경한다.
 - `changeCharacter(Long characterId)` : 현재 아바타 캐릭터 식별자를 변경한다.
 - `updatePassword(String newHashedPassword)` : 암호화된 새로운 비밀번호로 변경한다.
 - `withdraw()` : 사용자를 회원 탈퇴 처리하고 `deletedAt`을 현재 시각으로 설정한다.
@@ -94,16 +95,17 @@ _Value Object_
 
 ### 속성
 
-- `value` : String. 닉네임 문자열
+- `value` : String. 앞뒤 whitespace가 제거된 닉네임 문자열
 
 ### 행위
 
-- `Nickname(String value)` : 검증 로직을 포함하여 객체를 생성한다.
+- `Nickname(String value)` : 앞뒤 whitespace를 제거하고 필수 값과 길이를 검증하여 객체를 생성한다.
 
 ### 규칙
 
-- 닉네임은 비어 있지 않은 필수 값이다.
-- 길이는 최소 1자에서 최대 20자 사이여야 한다. 조건을 만족하지 않으면 예외가 발생한다.
+- 정규화는 Java의 Unicode-aware whitespace 판정에 따라 앞뒤 공백을 제거한다. 중간 whitespace, 대소문자와 기존 문자 정책은 유지한다.
+- 정규화된 닉네임은 비어 있지 않은 필수 값이며 길이는 최소 1자에서 최대 20자까지 허용한다. 필수 값이나 길이 조건을 만족하지 않으면 `InvalidNicknameException`이 발생한다.
+- 앞뒤 whitespace만 다른 입력은 같은 `Nickname` 값으로 비교된다.
 
 ---
 
@@ -133,9 +135,29 @@ _Domain Policy와 Application Port_
 ### 규칙
 
 - 점유 지속 시간은 `NicknamePolicy`가 3분으로 판단한다.
+- 닉네임 중복 검사와 점유 Port는 `Nickname` 값 객체를 받는다. 앞뒤 공백 형태가 다른 입력도 동일한 점유 키를 사용한다.
 - 동일 사용자는 만료 전 같은 닉네임 점유를 다시 확인할 수 있고, 다른 사용자는 획득할 수 없다.
 - 만료된 점유는 다른 사용자가 원자적으로 교체할 수 있다.
 - 프로필 저장 성공 후에만 점유를 해제하며 실패 시 재시도를 위해 만료 전까지 유지한다.
 - 현재 `ConcurrentHashMap` 기반 Adapter는 단일 애플리케이션 인스턴스에서만 점유를 공유한다.
 - 서버 재시작 시 점유가 사라지고 여러 인스턴스 사이에는 공유되지 않는다.
 - `users.nickname` 유일 제약은 최종 동시성 방어선이며, 위반은 User의 닉네임 충돌 의미로 번역한다.
+
+---
+
+## 닉네임 처리 정책
+
+### Application 정책
+
+- 회원가입, 닉네임 사용 가능 확인과 프로필 변경은 Application 진입 시 닉네임을 값 객체로 변환한다. 이후 중복 검사, 점유와 저장에는 정규화된 값을 사용한다.
+- 프로필 변경에서 닉네임이 null이면 닉네임 변경 의도가 없다. 빈 문자열과 whitespace만 있는 문자열은 캐릭터 변경이 함께 요청되어도 거절한다.
+- 정규화 후 현재 닉네임과 같으면 사용 가능 확인은 성공하고, 프로필 변경은 닉네임 변경 없음으로 처리하며 새 점유를 요구하지 않는다.
+
+### API 계약
+
+- Web Adapter는 잘못된 닉네임을 공용 Validation Problem Type의 400 Problem Details로 번역한다. 닉네임 중복은 기존 닉네임 충돌 문제 유형의 409 응답을 유지한다.
+- 프로필 변경 성공 응답은 실제 저장된 정규화 닉네임을 반환한다. 회원가입과 사용 가능 확인의 정상 응답 구조는 유지한다.
+
+### 호환성
+
+- 기존 DB 닉네임의 일괄 정규화나 충돌 해소는 수행하지 않으며 기존 비정규화 데이터의 후속 조회·갱신 호환성은 보장하지 않는다.
