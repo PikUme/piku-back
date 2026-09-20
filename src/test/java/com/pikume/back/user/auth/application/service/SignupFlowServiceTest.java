@@ -39,6 +39,20 @@ class SignupFlowServiceTest {
     SignupAuthentication emailProof() { return SignupAuthentication.email(SignupFlowService.hash("proof"), SignupFlowService.hash("caller"), "new@gmail.com", "once-hashed", now); }
 
 
+    @Test void oldSocialProofWithoutEmailCannotResumeOrCreateAMember() {
+        var pending = SignupAuthentication.social(SignupFlowService.hash("proof"), SignupFlowService.hash("caller"), "GOOGLE", "Subject", "provider@naver.com", now);
+        org.springframework.test.util.ReflectionTestUtils.setField(pending, "verifiedEmail", null);
+        proof(pending);
+
+        assertThatThrownBy(() -> service.progress("proof", "caller"))
+            .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.PROOF_INVALID);
+        assertThatThrownBy(() -> service.agree(new SignupAgreementCommand("proof", "caller", consent)))
+            .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.PROOF_INVALID);
+
+        verify(store, never()).createUser(any());
+        verify(store, never()).recordAgreement(any());
+    }
+
     @Test void consentStoresActualVersionedContentAndClearsPasswordHash() {
         var p=emailProof();proof(p);
         var result=service.agree(new SignupAgreementCommand("proof","caller",consent));
@@ -109,10 +123,10 @@ class SignupFlowServiceTest {
         when(policy.maxCodeAttempts()).thenReturn(1);
         Instant issuedAt = rejection.equals("EXPIRED") ? now.minusSeconds(301) : now;
         Verification challenge = Verification.signupChallenge("challenge", "new@gmail.com",
-                SignupFlowService.hash("caller"), null, issuedAt, 60);
+                SignupFlowService.hash("caller"), issuedAt, 60);
         challenge.activateSignupCode("123456", issuedAt);
         if (rejection.equals("EXHAUSTED")) {
-            challenge.validateSignup("new@gmail.com", SignupFlowService.hash("caller"), null, "000000", now, 1);
+            challenge.validateSignup("new@gmail.com", SignupFlowService.hash("caller"), "000000", now, 1);
         }
         if (rejection.equals("CONSUMED")) challenge.consumeSignup(now);
         when(store.lockChallenge("challenge")).thenReturn(rejection.equals("MISSING") ? Optional.empty() : Optional.of(challenge));
@@ -137,7 +151,7 @@ class SignupFlowServiceTest {
     void successfulEmailChallengeHashesOnceAfterValidationAndStoresTheHash() {
         when(policy.maxCodeAttempts()).thenReturn(1);
         Verification challenge = Verification.signupChallenge("challenge", "new@gmail.com",
-                SignupFlowService.hash("caller"), null, now, 60);
+                SignupFlowService.hash("caller"), now, 60);
         challenge.activateSignupCode("123456", now);
         when(store.lockChallenge("challenge")).thenReturn(Optional.of(challenge));
         when(passwords.protect("Password!")).thenReturn("protected-once");

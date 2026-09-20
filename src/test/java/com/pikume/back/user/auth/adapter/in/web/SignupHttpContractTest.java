@@ -108,16 +108,38 @@ class SignupHttpContractTest {
             .content("{\"email\":\"new@gmail.com\",\"restartAuthentication\":true}"))
             .andExpect(status().isTooManyRequests()).andExpect(cookie().doesNotExist(SignupWebCredentials.PROOF))
             .andExpect(jsonPath("$.status").value(429)).andExpect(jsonPath("$.detail").isString());
-        verify(flow).sendEmailCode(argThat(command -> command.signupProof()==null && command.challengeId()==null));
+        verify(flow).sendEmailCode(argThat(command -> command.challengeId()==null));
     }
-    @Test void resumedProofCookieCannotOutliveTheOriginalAuthenticationDeadline() throws Exception {
-        given(flow.verifySocialEmail(any())).willReturn(new SignupProofResult(PROOF,new SignupProgress(
+    @Test void issuedProofCookieCannotOutliveTheAuthenticationDeadline() throws Exception {
+        given(flow.authenticateEmail(any())).willReturn(new SignupProofResult(PROOF,new SignupProgress(
             SignupNextAction.AGREEMENTS,"user@gmail.com",null,null,Instant.now().plusSeconds(45))));
-        var response=mvc.perform(post("/api/auth/signup/social/email").header("Origin","https://www.pikume.com")
+        var response=mvc.perform(post("/api/auth/signup/email").header("Origin","https://www.pikume.com")
             .header("X-Signup-CSRF",CSRF).cookie(cookies()).contentType(MediaType.APPLICATION_JSON)
-            .content("{\"challengeId\":\"challenge\",\"email\":\"user@gmail.com\",\"code\":\"123456\"}"))
+            .content(emailBody()))
             .andExpect(status().isOk()).andReturn().getResponse();
         assertThat(response.getCookie(SignupWebCredentials.PROOF).getMaxAge()).isBetween(1,45);
+    }
+    @ParameterizedTest
+    @ValueSource(strings={"/api/auth/signup/social/email","/api/mobile/auth/signup/social/email"})
+    void removedSocialEmailEndpointCannotChangeAnAuthentication(String path) throws Exception {
+        mvc.perform(post(path).header("Origin","https://www.pikume.com")
+            .header("X-Signup-CSRF",CSRF).header("X-Signup-Binding",BINDING).header("X-Signup-Proof",PROOF)
+            .cookie(cookies()).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"challengeId\":\"old-social-challenge\",\"email\":\"other@gmail.com\",\"code\":\"123456\"}"))
+            .andExpect(status().isNotFound());
+        verifyNoInteractions(flow);
+    }
+    @ParameterizedTest
+    @EnumSource(value=SignupFailure.class,names={"EMAIL_REQUIRED","INVALID_EMAIL"})
+    void unavailableProviderEmailReturnsAuthenticationRestartProblem(SignupFailure failure) throws Exception {
+        given(flow.agree(any())).willThrow(new SignupFlowException(failure));
+        mvc.perform(post("/api/mobile/auth/signup/agreements").header("X-Signup-Binding",BINDING)
+            .header("X-Signup-Proof",PROOF).header("Device-Id","device").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"agreements\":[{\"type\":\"TERMS\",\"version\":\"v1\",\"agreed\":true}]}"))
+            .andExpect(status().isBadRequest()).andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+            .andExpect(jsonPath("$.status").value(400)).andExpect(jsonPath("$.detail").isString())
+            .andExpect(jsonPath("$.instance").value("/api/mobile/auth/signup/agreements"))
+            .andExpect(jsonPath("$.code").value(failure.name())).andExpect(jsonPath("$.nextAction").value("AUTHENTICATE"));
     }
     @Test void pageEntryIssuesOnlyCookiesAndNoSignupRecord() throws Exception {
         given(config.querySignupConfiguration()).willReturn(new SignupConfiguration(true,false));

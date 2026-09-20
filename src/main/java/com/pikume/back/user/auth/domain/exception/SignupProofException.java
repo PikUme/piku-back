@@ -1,7 +1,7 @@
 package com.pikume.back.user.auth.domain.exception;
 
 public class SignupProofException extends RuntimeException {
-    public enum Reason { INVALID, EXPIRED, ALREADY_USED, EMAIL_REQUIRED, FLOW_MISMATCH }
+    public enum Reason { INVALID, EXPIRED, ALREADY_USED, FLOW_MISMATCH }
 
     private final Reason reason;
 

@@ -3,7 +3,7 @@
 - Status: 구현 계약, 배포·활성화 전
 - Audience: 프론트엔드·모바일 개발자
 - Source of Truth: Yes
-- Last Reviewed: 2026-09-20
+- Last Reviewed: 2026-09-21
 
 ## 클라이언트가 바꿀 흐름
 
@@ -14,7 +14,6 @@
 | nextAction | 화면의 다음 동작 |
 | --- | --- |
 | `AUTHENTICATE` | 인증 시작. `userId`가 있으면 이미 생성된 회원이므로 기존 로그인으로 세션 복구 |
-| `VERIFY_EMAIL` | 소셜 신원은 확인됨. 서비스 이메일을 코드로 인증 |
 | `AGREEMENTS` | 최신 필수 약관 표시와 동의 제출 |
 | `PROFILE` | 닉네임 점유 후 닉네임·고정 캐릭터 함께 제출 |
 | `COMPLETE` | 일반 서비스 진입 |
@@ -35,7 +34,6 @@
 | 동의 문서 조회 | GET | `/api/auth/signup/agreements` | `/api/mobile/auth/signup/agreements` |
 | 이메일 인증 코드 발송 | POST | `/api/auth/signup/email/code` | `/api/mobile/auth/signup/email/code` |
 | 이메일 인증 화면 제출 | POST | `/api/auth/signup/email` | `/api/mobile/auth/signup/email` |
-| 소셜 가입 이메일 보완 | POST | `/api/auth/signup/social/email` | `/api/mobile/auth/signup/social/email` |
 | 동의 제출·회원 생성 | POST | `/api/auth/signup/agreements` | `/api/mobile/auth/signup/agreements` |
 | 닉네임 중복 확인·예약 | POST | `/api/auth/signup/nickname` | `/api/mobile/auth/signup/nickname` |
 | 닉네임·캐릭터 확정 | POST | `/api/auth/signup/profile` | `/api/mobile/auth/signup/profile` |
@@ -60,9 +58,8 @@
 | --- | --- | --- |
 | GET `/progress` | 로그인했다면 Bearer 토큰. 진행 중 증명은 아래 전달 규칙 적용 | `enabled`, `progress`, 웹 `csrfToken` 또는 모바일 `callerBinding`. 페이지 진입으로 DB 가입 레코드를 생성하지 않음 |
 | GET `/agreements` | 없음 | 문서 배열: `type`, `version`, `content`, `required` |
-| POST `/email/code` | `email`, 선택 `challengeId`, 선택 `restartAuthentication` | `challengeId`, `expiresAt`, `resendAvailableAt`. 기본 동작은 기존 소셜 증명의 이메일 보완. `restartAuthentication: true`면 이전 증명·challenge와 분리된 이메일 가입 인증 시작 |
+| POST `/email/code` | `email`, 선택 `challengeId`, 선택 `restartAuthentication` | `challengeId`, `expiresAt`, `resendAvailableAt`. 일반 이메일 가입 코드만 발송하며 소셜 증명에는 결속하지 않음. true면 이전 challenge와 분리된 새 인증 시작 |
 | POST `/email` | `challengeId`, `email`, `code`, `password` | 이메일 인증·비밀번호 검증 후 `progress`와 가입 증명 전달 |
-| POST `/social/email` | `challengeId`, `email`, `code`와 기존 가입 증명 | 같은 소셜 가입 증명의 이메일 인증 완료 |
 | POST `/agreements` | `agreements` 배열의 `type`, `version`, `agreed`; 가입 증명과 `Device-Id` 필수 | 회원 생성 후 `progress`, `user`, 로그인 자격 전달 |
 | POST `/nickname` | Bearer 토큰, `nickname` | `nickname`, `expiresAt`. 3분 예약 |
 | POST `/profile` | Bearer 토큰, `nickname`, `characterId` | `userId`, `nickname`, `characterId`, `profileSetupStatus: COMPLETED` |
@@ -74,7 +71,7 @@
 
 프로필 입력란은 서버 응답의 `user.nickname`으로 미리 채운다. 정규화 후 본인에게 저장된 현재 기본 닉네임과 같으면 별도 중복 확인·예약 없이 캐릭터와 함께 완료할 수 있다. 수정한 닉네임에는 기존 3분 예약이 필요하다. 기본값으로 되돌려 완료하면 그 회원의 다른 예약도 같은 트랜잭션에서 해제한다. 본인 현재값으로 중복 확인 API를 호출해도 기존처럼 `nickname`, 유효한 `expiresAt`을 반환하며 null 만료 시각을 추가하지 않는다. 기존 `가입대기_` 닉네임을 쓰는 미완료 회원은 새 닉네임을 예약·선택해야 한다. 완료 API 제출 전에는 기본값을 가지고 있어도 `REQUIRED`와 이용 제한을 유지한다.
 
-인증 화면으로 돌아가 다른 이메일로 가입하거나 소셜 가입을 이메일 가입으로 바꾸면 코드 발송에 `restartAuthentication: true`를 보낸다. 서버는 이전 증명과 `challengeId`를 사용하지 않으며, 발송 성공 후 웹의 이전 증명 쿠키를 지운다. 모바일은 성공 후 저장한 `proof`를 지우고 새 `challengeId`를 사용한다. 실패 시 이전 증명을 유지한다. 이어지는 일반 재발송에는 새 `challengeId`와 기본값 false를 사용한다. 소셜 신원 연결을 유지하면서 이메일만 보완할 때는 이 옵션을 사용하지 않는다. 옵션으로 기존 회원이나 가입 자료를 삭제하지 않으며 발송 제한도 우회하지 않는다.
+인증 화면으로 돌아가 다른 이메일로 가입하거나 소셜 가입을 이메일 가입으로 바꾸면 코드 발송에 restartAuthentication: true를 보낸다. 서버는 이전 challengeId를 사용하지 않으며 발송 성공 후 웹의 이전 증명 쿠키를 지운다. 모바일은 성공 후 저장한 proof를 지우고 새 challengeId를 사용한다. 실패 시 이전 증명을 유지한다. 일반 재발송은 새 challengeId와 기본값 false를 사용한다. 코드 발송은 항상 일반 이메일 가입이며 기존 소셜 증명의 이메일을 수정하지 않는다. 옵션으로 기존 회원이나 가입 자료를 삭제하지 않으며 발송 제한을 우회하지 않는다.
 
 ### 필드 형식과 공통 응답
 
@@ -84,7 +81,7 @@
 | --- | --- |
 | `email` | 이메일 문자열. 코드 발송 요청은 최대 255자. Gmail의 점이나 `+tag`를 제거하지 않음 |
 | `challengeId` | 서버 발송 응답의 문자열. 재발송 시 직전 값을 전달하며 인증 화면 제출에서는 필수 |
-| `restartAuthentication` | 선택 boolean, 기본 false. true는 소셜 이메일 보완을 중단하고 별도의 이메일 가입 인증 시작 |
+| `restartAuthentication` | 선택 boolean, 기본 false. true는 이전 challenge를 재사용하지 않고 별도의 일반 이메일 가입 인증 시작 |
 | `code` | 숫자 6자리 문자열. 앞자리 0을 유지 |
 | 이메일 가입 `password` | 길이 1~72자. 영문·숫자·`!@#$%^&*`만 허용하며 해당 특수문자 최소 1개 포함 |
 | `agreements` | 1~20개 객체 배열. 각 객체는 `type: string`, `version: string`, `agreed: boolean`. 동일 `type` 중복 제출 불가 |
@@ -94,11 +91,11 @@
 
 진행 조회의 최상위 필드는 `enabled: boolean`, `progress: object`와 웹의 `csrfToken: string` 또는 모바일의 `callerBinding: string`이다. `enabled`는 신규 가입 기능 상태이며 외부 인증 기능의 활성 여부를 나타내는 필드가 아니다.
 
-이메일 인증·소셜 이메일 보완·동의 제출는 아래의 공통 단계 응답을 사용한다. 최상위의 값 없는 `user`, `tokens`, `proof`는 JSON에서 생략된다.
+이메일 인증·동의 제출은 아래의 공통 단계 응답을 사용한다. 최상위의 값 없는 `user`, `tokens`, `proof`는 JSON에서 생략된다.
 
 | 응답 필드 | 형식·등장 조건 |
 | --- | --- |
-| `progress.nextAction` | `AUTHENTICATE`, `VERIFY_EMAIL`, `AGREEMENTS`, `PROFILE`, `COMPLETE` 중 하나 |
+| `progress.nextAction` | `AUTHENTICATE`, `AGREEMENTS`, `PROFILE`, `COMPLETE` 중 하나. 이메일 코드 발송 전후 UI 상태는 클라이언트가 challenge 응답으로 관리 |
 | `progress.email` | 문자열 또는 null. 인증된 회원의 진행 조회에서는 null일 수 있으므로 회원 이메일 조회 용도로 사용하지 않음 |
 | `progress.userId` | 문자열 또는 null. 회원이 정해지기 전에는 null |
 | `progress.profileSetupStatus` | `REQUIRED`, `COMPLETED` 또는 null |
@@ -161,8 +158,8 @@ GET `/progress`로 받은 `csrfToken`을 이후 신규 가입 쓰기의 `X-Signu
 | --- | --- |
 | GET `/api/auth/signup/progress` | 쿠키 포함. 로그인 상태 조회 시 Bearer도 전송. `Origin`이 있으면 허용 목록 검사 |
 | GET `/api/auth/signup/agreements`, `/api/characters/fixed` | 로그인·가입 증명 불필요 |
-| POST `/email/code`, `/email` | 허용 Origin + 호출자·CSRF 쿠키 + `X-Signup-CSRF`. 소셜 이메일 코드 발송에는 증명 쿠키도 필요 |
-| POST `/social/email`, `/agreements` | 위 자격 + 가입 증명 쿠키. `/agreements`에는 `Device-Id` 추가 |
+| POST `/email/code`, `/email` | 허용 Origin + 호출자·CSRF 쿠키 + `X-Signup-CSRF`. 일반 이메일 코드 발송·인증에는 증명 쿠키를 사용하지 않음 |
+| POST `/agreements` | 위 자격 + 가입 증명 쿠키와 `Device-Id` |
 | POST `/nickname`, POST·DELETE `/profile` | 허용 Origin + 호출자·CSRF 쿠키 + `X-Signup-CSRF` + Bearer |
 
 이 표의 가입 하위 경로 기준은 `/api/auth/signup`이다. 호출자 쿠키는 `__Host-pk-signup-binding`, CSRF 쿠키는 `__Host-pk-signup-csrf`이며 각각 최대 24시간이다. 가입 증명 쿠키의 Max-Age는 DB 증명의 실제 남은 초로 설정한다. 재응답으로 10분이 다시 시작되지 않으며 이미 만료됐으면 삭제한다. 최종 유효성은 서버가 판단한다. CORS는 `Authorization` 응답 헤더를 프론트가 읽도록 노출한다.
@@ -179,7 +176,7 @@ GET `/progress`로 받은 `csrfToken`을 이후 신규 가입 쓰기의 `X-Signu
 
 GET `/progress`에서 받은 `callerBinding`을 가입 진행 동안 보관하고 이후 `X-Signup-Binding` 헤더로 보낸다. 인증 성공 응답의 `proof`는 `X-Signup-Proof` 헤더로 전달한다. 웹 CSRF 헤더와 쿠키는 사용하지 않는다. 기기·토큰 보관은 모바일의 기존 인증 저장 방식에 맞추되 URL이나 로그에 넣지 않는다.
 
-모바일의 모든 가입 쓰기에는 `X-Signup-Binding`을 전달하고 소셜 이메일 코드 발송·이메일 보완·동의에는 `X-Signup-Proof`도 전달한다. 동의에는 `Device-Id`, 프로필 예약·완료·탈퇴에는 Bearer가 추가로 필요하다. 프로필 단계에서도 호출자 헤더를 생략하지 않는다.
+모바일의 모든 가입 쓰기에는 `X-Signup-Binding`을 전달하고 동의에는 `X-Signup-Proof`도 전달한다. 일반 이메일 발송·인증은 소셜 증명에 결속하지 않는다. 동의에는 `Device-Id`, 프로필 예약·완료·탈퇴에는 Bearer가 추가로 필요하다. 프로필 단계에서도 호출자 헤더를 생략하지 않는다.
 
 회원이 결정된 응답은 `tokens`에 기존 모바일 형식인 `tokenType`, `accessToken`, `refreshToken`, `accessTokenExpiresIn`, `refreshTokenExpiresIn`을 담는다. 새 회원 인증 단계에서는 `tokens` 없이 `proof`와 `progress`를 받는다. 모바일 현재 회원 조회는 GET `/api/mobile/auth/me`다. 기존 로그인·재발급·로그아웃 API는 유지한다.
 
@@ -215,11 +212,11 @@ JSON API 오류는 RFC 9457 `application/problem+json`이며 `type`, `title`, `s
 
 | HTTP | `code` | 클라이언트 처리 |
 | --- | --- | --- |
-| 400 | `INVALID_REQUEST`, `INVALID_EMAIL`, `INVALID_PASSWORD` | 입력 수정. 허용 이메일·비밀번호 정책 확인 |
+| 400 | `INVALID_REQUEST`, `INVALID_PASSWORD` | 입력 수정. 허용 이메일·비밀번호 정책 확인 |
 | 400 | `PROOF_INVALID`, `FLOW_MISMATCH` | 현재 진행을 조회하고 올바른 인증 흐름으로 다시 시작 |
-| 400 | `CHALLENGE_INVALID` | 현재 인증 시도와 호출자·증명의 결합 확인 후 코드 재발송 |
+| 400 | `CHALLENGE_INVALID` | 현재 일반 이메일 인증 시도와 호출자의 결합 확인 후 코드 재발송 |
 | 400 | `CODE_MISMATCH` | 코드 재입력. 같은 오입력을 자동 재시도하지 않음 |
-| 400 | `EMAIL_REQUIRED` | 같은 소셜 가입 증명으로 이메일 보완 |
+| 400 | `EMAIL_REQUIRED`, `INVALID_EMAIL` | 이메일 누락·부적합으로 증명·회원 생성 없이 `AUTHENTICATE`로 재시작. 소셜 가입은 제공자 이메일을 직접 수정할 수 없고, 일반 이메일 가입은 입력을 수정 |
 | 400 | `AGREEMENTS_REQUIRED` | 필수 문서의 동의 여부 확인 |
 | 400 | `INVALID_NICKNAME`, `INVALID_CHARACTER` | 닉네임 수정 또는 고정 캐릭터 목록 재조회 |
 | 400 | `CALLER_REQUIRED` | 진행 조회로 호출자 쿠키·헤더 초기화. 호출자를 잃었으면 종전 증명을 재사용할 수 있다고 가정하지 않음 |
@@ -270,4 +267,4 @@ API·약관 설정과 기본 캐릭터가 준비되기 전까지 실제 서비�
 
 ## 외부 로그인과의 경계
 
-소셜 이메일 보완과 `VERIFY_EMAIL` 상태는 검증된 소셜 가입 증명을 받았을 때 사용하는 공통 계약이다. 이 변경만으로 외부 인증이나 연결 시작 API를 호출할 수는 없다. 이메일 가입은 별도 제공자 인증 없이 인증·동의·프로필의 모든 단계를 완료할 수 있다.
+신규 소셜 증명은 검증된 제공자 결과의 유효 이메일을 필수로 포함하고 바로 `AGREEMENTS`로 진행한다. 소셜 이메일 보완 API와 `VERIFY_EMAIL` 상태는 제공하지 않는다. 이 변경만으로 외부 인증이나 연결 시작 API를 호출할 수는 없다. 이메일 가입은 별도 제공자 인증 없이 인증·동의·프로필의 모든 단계를 완료할 수 있다.

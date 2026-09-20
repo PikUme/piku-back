@@ -90,6 +90,32 @@ class SignupConcurrencyMySqlIntegrationTest extends SignupPersistenceTestSupport
         assertThat(count("UserOAuthAccount")).isEqualTo(social?1:0);
     }
 
+    @Test void oldSocialProofWithoutEmailCannotResumeOrCreateAMember() {
+        String proof=socialProof("OldSubject","old@naver.com");
+        jdbc.update("UPDATE signup_authentications SET verified_email=NULL WHERE token_hash=?",SignupFlowService.hash(proof));
+
+        assertThat(outcome(()->service.progress(proof,"caller"))).isEqualTo(SignupFailure.PROOF_INVALID);
+        assertThat(outcome(()->service.agree(new SignupAgreementCommand(proof,"caller",agreements)))).isEqualTo(SignupFailure.PROOF_INVALID);
+
+        assertThat(count("User")).isZero();
+        assertThat(count("UserAgreement")).isZero();
+        assertThat(count("UserOAuthAccount")).isZero();
+    }
+
+    @Test void oldSocialChallengeCannotBeVerifiedOrResentAsEmailSignup() {
+        Challenge challenge=readyChallenge();
+        jdbc.update("UPDATE verification SET signup_proof_hash=? WHERE challenge_id=?",SignupFlowService.hash("old-proof"),challenge.id());
+        org.mockito.Mockito.clearInvocations(sender);
+
+        assertThat(outcome(()->verify(challenge,"123456"))).isEqualTo(SignupFailure.CHALLENGE_INVALID);
+        assertThat(outcome(()->resend(challenge))).isEqualTo(SignupFailure.CHALLENGE_INVALID);
+
+        org.mockito.Mockito.verifyNoInteractions(sender);
+        assertThat(count("SignupAuthentication")).isZero();
+        assertThat(count("User")).isZero();
+        assertThat((Instant)tx.required(()->store.lockChallenge(challenge.id()).orElseThrow().getConsumedAt())).isNull();
+    }
+
     @Test void parallelDefaultsUseDatabaseNicknameEqualityAcrossEmailDomains() throws Exception {
         String first=emailProof("haru@first.example"),second=emailProof("HARU@second.example");
         CyclicBarrier ready=new CyclicBarrier(2);
@@ -149,10 +175,9 @@ class SignupConcurrencyMySqlIntegrationTest extends SignupPersistenceTestSupport
         } finally {locked.release();}
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans={false,true})
-    void verificationFirstPreventsResendFromReopeningTheConsumedChallenge(boolean social) throws Exception {
-        Challenge challenge=readyChallenge(social);
+    @Test
+    void verificationFirstPreventsResendFromReopeningTheConsumedChallenge() throws Exception {
+        Challenge challenge=readyChallenge();
         Gate verificationLocked=pauseFirstChallengeLock();
         Future<Object> verification=workers.submit(()->outcome(()->verify(challenge,"123456")));
         try {
@@ -161,17 +186,15 @@ class SignupConcurrencyMySqlIntegrationTest extends SignupPersistenceTestSupport
             awaitDatabaseWait();
             verificationLocked.release();
             assertThat(verification.get(15,TimeUnit.SECONDS)).isInstanceOf(SignupProofResult.class);
-            // Social email verification consumes the challenge, while its signup proof remains unconsumed.
             assertThat(resend.get(15,TimeUnit.SECONDS)).isEqualTo(SignupFailure.CHALLENGE_INVALID);
             assertThat(count("SignupAuthentication")).isEqualTo(1);
             assertThat((Instant)tx.required(()->store.lockChallenge(challenge.id()).orElseThrow().getConsumedAt())).isNotNull();
         } finally {verificationLocked.release();}
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans={false,true})
-    void resendFirstInvalidatesOldCodeWhileDeliveryIsPending(boolean social) throws Exception {
-        Challenge challenge=readyChallenge(social);
+    @Test
+    void resendFirstInvalidatesOldCodeWhileDeliveryIsPending() throws Exception {
+        Challenge challenge=readyChallenge();
         Gate resendLocked=pauseFirstChallengeLock(),mail=new Gate();
         doAnswer(call->{mail.block();return "654321";}).when(sender).issueVerificationEmail(anyString());
         Future<Object> resend=workers.submit(()->outcome(()->resend(challenge)));
@@ -211,7 +234,7 @@ class SignupConcurrencyMySqlIntegrationTest extends SignupPersistenceTestSupport
             assertThat(request.get(15,TimeUnit.SECONDS)).isEqualTo(operation==Operation.CONSENT?SignupFailure.PROOF_INVALID:SignupFailure.CHALLENGE_INVALID);
             assertThat(count("User")).isZero();assertThat(count("UserAgreement")).isZero();
             assertThat(count("Verification")).isZero();
-            assertThat(count("SignupAuthentication")).isEqualTo(operation==Operation.SOCIAL_EMAIL?1:0);
+            assertThat(count("SignupAuthentication")).isZero();
         } finally {deleted.release();}
     }
 
@@ -264,40 +287,11 @@ class SignupConcurrencyMySqlIntegrationTest extends SignupPersistenceTestSupport
 
     private Attempt attempt(Operation operation) {
         return operation==Operation.CONSENT?new Attempt(emailProof("consent@gmail.com"),null)
-            :new Attempt(null,readyChallenge(operation==Operation.SOCIAL_EMAIL));
-    }
-
-    @ParameterizedTest
-    @EnumSource(SocialWait.class)
-    void socialProofExpiringWhileWaitingForAnotherLockCannotContinue(SocialWait waitAt) throws Exception {
-        Challenge challenge=readyChallenge(true);
-        Instant expires=Instant.now().plusSeconds(2);
-        expire(new Attempt(challenge.proof(),null),expires);
-        org.mockito.Mockito.clearInvocations(sender);
-        Gate locked=new Gate();
-        Future<?> holder=workers.submit(()->tx.required(()->{
-            if(waitAt==SocialWait.RESEND_GUARD)
-                em.createNativeQuery("SELECT bucket_key FROM signup_rate_limits WHERE bucket_key='guard' FOR UPDATE").getSingleResult();
-            else store.lockChallenge(challenge.id()).orElseThrow();
-            try {locked.block();}catch(InterruptedException error){Thread.currentThread().interrupt();throw new IllegalStateException(error);}
-            return null;
-        }));
-        try {
-            locked.awaitEntered();
-            Future<Object> request=workers.submit(()->outcome(()->waitAt==SocialWait.VERIFY_CHALLENGE?verify(challenge,"123456"):resend(challenge)));
-            awaitDatabaseWait();
-            await().atMost(Duration.ofSeconds(4)).until(()->Instant.now().isAfter(expires));
-            locked.release();holder.get(15,TimeUnit.SECONDS);
-            assertThat(request.get(15,TimeUnit.SECONDS)).isEqualTo(SignupFailure.PROOF_EXPIRED);
-            org.mockito.Mockito.verifyNoInteractions(sender);
-            assertThat((String)tx.required(()->store.lockProof(SignupFlowService.hash(challenge.proof())).orElseThrow().getVerifiedEmail())).isNull();
-            assertThat((Instant)tx.required(()->store.lockChallenge(challenge.id()).orElseThrow().getConsumedAt())).isNull();
-            assertThat(count("User")).isZero();
-        } finally {locked.release();}
+            :new Attempt(null,readyChallenge());
     }
 
     @Test void cleanupWaitingOnResendKeepsTheRenewedChallenge() throws Exception {
-        Challenge challenge=readyChallenge(false);
+        Challenge challenge=readyChallenge();
         expire(new Attempt(null,challenge),Instant.now().minusSeconds(1));
         Gate renewed=new Gate();
         doAnswer(call->{Object result=call.callRealMethod();renewed.block();return result;}).when(observed).saveChallenge(any());
@@ -314,7 +308,7 @@ class SignupConcurrencyMySqlIntegrationTest extends SignupPersistenceTestSupport
     }
 
     @Test void resendWaitingForRateGuardStartsItsCooldownAtReservationTime() throws Exception {
-        Challenge challenge=readyChallenge(false);
+        Challenge challenge=readyChallenge();
         Gate locked=new Gate();
         Future<?> holder=workers.submit(()->tx.required(()->{
             em.createNativeQuery("SELECT bucket_key FROM signup_rate_limits WHERE bucket_key='guard' FOR UPDATE").getSingleResult();
@@ -350,23 +344,21 @@ class SignupConcurrencyMySqlIntegrationTest extends SignupPersistenceTestSupport
             return null;
         });
     }
-    private Challenge readyChallenge(boolean social) {
-        String proof=social?socialProof("Subject",null):null;
-        var challenge=service.sendEmailCode(new EmailSignupChallengeCommand("code@gmail.com","caller","origin",null,proof));
+    private Challenge readyChallenge() {
+        var challenge=service.sendEmailCode(new EmailSignupChallengeCommand("code@gmail.com","caller","origin",null));
         tx.required(()->{
             em.createQuery("update Verification v set v.resendAvailableAt=:past where v.challengeId=:id")
                 .setParameter("past",Instant.now().minusSeconds(61)).setParameter("id",challenge.challengeId()).executeUpdate();
             em.createQuery("update SignupRateLimit b set b.lastSentAt=:past where b.bucketKey<>'guard'")
                 .setParameter("past",Instant.now().minusSeconds(61)).executeUpdate();return null;
         });
-        return new Challenge(challenge.challengeId(),proof);
+        return new Challenge(challenge.challengeId());
     }
     private SignupProofResult verify(Challenge challenge,String code) {
-        return challenge.proof()==null?service.authenticateEmail(new EmailSignupAuthenticationCommand(challenge.id(),"code@gmail.com",code,"Password!","caller"))
-            :service.verifySocialEmail(new SocialSignupEmailCommand(challenge.proof(),challenge.id(),"code@gmail.com",code,"caller"));
+        return service.authenticateEmail(new EmailSignupAuthenticationCommand(challenge.id(),"code@gmail.com",code,"Password!","caller"));
     }
     private EmailSignupChallengeResult resend(Challenge challenge) {
-        return service.sendEmailCode(new EmailSignupChallengeCommand("code@gmail.com","caller","origin",challenge.id(),challenge.proof()));
+        return service.sendEmailCode(new EmailSignupChallengeCommand("code@gmail.com","caller","origin",challenge.id()));
     }
     private String socialProof(String subject,String email) {
         String raw=java.util.UUID.randomUUID().toString();
@@ -380,10 +372,9 @@ class SignupConcurrencyMySqlIntegrationTest extends SignupPersistenceTestSupport
     private Object outcome(Supplier<?> request) {
         try{return request.get();}catch(SignupFlowException error){return error.getReason();}
     }
-    private record Challenge(String id,String proof) {}
+    private record Challenge(String id) {}
     private record Attempt(String proof,Challenge challenge) {}
-    private enum Operation { CONSENT, EMAIL, SOCIAL_EMAIL }
-    private enum SocialWait { RESEND_CHALLENGE, RESEND_GUARD, VERIFY_CHALLENGE }
+    private enum Operation { CONSENT, EMAIL }
     private static final class Gate {
         private final CountDownLatch entered=new CountDownLatch(1),released=new CountDownLatch(1);
         void block() throws InterruptedException {entered.countDown();if(!released.await(15,TimeUnit.SECONDS))throw new IllegalStateException("gate timeout");}
