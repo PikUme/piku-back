@@ -67,13 +67,13 @@ class SignupConcurrencyMySqlIntegrationTest extends SignupPersistenceTestSupport
         String first=social?socialProof("Subject","same@gmail.com"):emailProof("same@gmail.com");
         String second=social?socialProof(sameSubject?"Subject":"OtherSubject",sameEmail?"same@gmail.com":"other@gmail.com")
             :emailProof("same@gmail.com");
-        CyclicBarrier bothReadAbsent=new CyclicBarrier(2);
+        CyclicBarrier bothProofsLocked=new CyclicBarrier(2);
         AtomicInteger reads=new AtomicInteger();
         doAnswer(call->{
             Object result=call.callRealMethod();
-            if(reads.incrementAndGet()<=2)bothReadAbsent.await(10,TimeUnit.SECONDS);
+            if(reads.incrementAndGet()<=2)bothProofsLocked.await(10,TimeUnit.SECONDS);
             return result;
-        }).when(observed).findUserByEmail(anyString());
+        }).when(observed).lockProof(anyString());
 
         Future<Object> a=workers.submit(()->outcome(()->service.agree(new SignupAgreementCommand(first,"caller",agreements))));
         Future<Object> b=workers.submit(()->outcome(()->service.agree(new SignupAgreementCommand(second,"caller",agreements))));
@@ -88,6 +88,65 @@ class SignupConcurrencyMySqlIntegrationTest extends SignupPersistenceTestSupport
         assertThat(count("User")).isEqualTo(1);
         assertThat(count("UserAgreement")).isEqualTo(1);
         assertThat(count("UserOAuthAccount")).isEqualTo(social?1:0);
+    }
+
+    @Test void parallelDefaultsUseDatabaseNicknameEqualityAcrossEmailDomains() throws Exception {
+        String first=emailProof("haru@first.example"),second=emailProof("HARU@second.example");
+        CyclicBarrier ready=new CyclicBarrier(2);
+        List<Future<SignupProofResult>> requests=List.of(first,second).stream().map(proof->workers.submit(()->{
+            ready.await(5,TimeUnit.SECONDS);
+            return service.agree(new SignupAgreementCommand(proof,"caller",agreements));
+        })).toList();
+        for(Future<SignupProofResult> request:requests) assertThat(request.get(15,TimeUnit.SECONDS).progress().nextAction()).isEqualTo(SignupNextAction.PROFILE);
+
+        List<String> names=observer.queryForList("SELECT nickname FROM users",String.class);
+        assertThat(names).hasSize(2);
+        assertThat(names.stream().filter(name->name.equalsIgnoreCase("haru"))).hasSize(1);
+        assertThat(names.stream().filter(name->name.matches("(?i)haru[0-9]{4}"))).hasSize(1);
+        assertThat(count("UserAgreement")).isEqualTo(2);
+    }
+
+    @Test void defaultGenerationWaitsForReservationCommitAndPreservesThatReservation() throws Exception {
+        var owner=tx.required(()->store.createUser(new com.pikume.back.user.domain.User("owner@example.com",null,"owner",5L)));
+        String proof=emailProof("haru@example.com");
+        Gate reserved=new Gate();
+        Future<?> reservation=workers.submit(()->tx.required(()->{
+            nicknameHolds.tryAcquire(new com.pikume.back.user.domain.vo.Nickname("HARU"),owner.getId(),Instant.now());
+            try {reserved.block();} catch(InterruptedException error) {Thread.currentThread().interrupt();throw new IllegalStateException(error);}
+            return null;
+        }));
+        try {
+            reserved.awaitEntered();
+            Future<SignupProofResult> consent=workers.submit(()->service.agree(new SignupAgreementCommand(proof,"caller",agreements)));
+            awaitDatabaseWait();reserved.release();reservation.get(15,TimeUnit.SECONDS);
+            String userId=consent.get(15,TimeUnit.SECONDS).progress().userId();
+
+            assertThat(observer.queryForObject("SELECT nickname FROM users WHERE id=?",String.class,userId)).matches("haru[0-9]{4}");
+            assertThat(observer.queryForObject("SELECT user_id FROM nickname_holds WHERE nickname='haru'",String.class)).isEqualTo(owner.getId());
+        } finally {reserved.release();}
+    }
+
+    @Test void waitingForNicknameMutexCannotExtendExpiredSignupProof() throws Exception {
+        String proof=emailProof("haru@example.com");
+        Instant expires=Instant.now().plusSeconds(2);
+        expire(new Attempt(proof,null),expires);
+        Gate locked=new Gate();
+        Future<?> holder=workers.submit(()->tx.required(()->{
+            nicknameHolds.lockNicknameWrites();
+            try {locked.block();} catch(InterruptedException error) {Thread.currentThread().interrupt();throw new IllegalStateException(error);}
+            return null;
+        }));
+        try {
+            locked.awaitEntered();
+            Future<Object> consent=workers.submit(()->outcome(()->service.agree(new SignupAgreementCommand(proof,"caller",agreements))));
+            awaitDatabaseWait();
+            await().atMost(Duration.ofSeconds(4)).until(()->Instant.now().isAfter(expires));
+            locked.release();holder.get(15,TimeUnit.SECONDS);
+
+            assertThat(consent.get(15,TimeUnit.SECONDS)).isEqualTo(SignupFailure.PROOF_EXPIRED);
+            assertThat(count("User")).isZero();
+            assertThat(count("UserAgreement")).isZero();
+        } finally {locked.release();}
     }
 
     @ParameterizedTest

@@ -83,7 +83,7 @@ class SignupProfileServiceTest {
 		order.verify(users).loadProfileUserForUpdate("user-1");
 		order.verify(holds).isHeldBy(eq(new Nickname("nick")), eq("user-1"), any());
 		order.verify(accounts).recordUserAccount(user);
-		order.verify(holds).release(new Nickname("nick"), "user-1");
+		order.verify(holds).releaseForUser("user-1");
 	}
 
 	@Test void identicalCompletedRetryNeedsNoHoldOrCharacterLookup() {

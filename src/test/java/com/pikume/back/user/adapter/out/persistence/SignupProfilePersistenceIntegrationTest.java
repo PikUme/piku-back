@@ -67,6 +67,51 @@ class SignupProfilePersistenceIntegrationTest {
 		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM nickname_holds",Integer.class)).isZero();
 	}
 
+	@Test void ownDefaultNicknameCompletesWithoutReservationAndReleasesAnAbandonedAlternative() {
+		User user=users.saveAndFlush(User.pending("haru@example.com",null,"haru",1L));
+		service.reserveSignupNickname(user.getId(),"different");
+		given(characters.resolveFixedCharacterObjectKey(1L)).willReturn(Optional.of("default.webp"));
+
+		var completed=service.completeSignupProfile(user.getId()," haru ",1L);
+
+		assertThat(completed.nickname()).isEqualTo("haru");
+		assertThat(completed.profileSetupStatus()).isEqualTo("COMPLETED");
+		assertThat(service.completeSignupProfile(user.getId(),"haru",1L)).isEqualTo(completed);
+		assertThat(users.findById(user.getId()).orElseThrow().getNickname()).isEqualTo("haru");
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM nickname_holds",Integer.class)).isZero();
+	}
+
+	@Test void checkingOwnDefaultReturnsACompatibleReservationAndCannotBeClaimedByAnotherUser() {
+		User user=users.saveAndFlush(User.pending("haru@example.com",null,"haru",1L));
+		User other=users.saveAndFlush(User.pending("other@example.com",null,"other",1L));
+
+		var reservation=service.reserveSignupNickname(user.getId()," haru ");
+
+		assertThat(reservation.nickname()).isEqualTo("haru");
+		assertThat(reservation.expiresAt()).isNotNull();
+		assertThat(service.reserveSignupNickname(user.getId(),"haru").expiresAt()).isEqualTo(reservation.expiresAt());
+		assertThatThrownBy(()->service.reserveSignupNickname(other.getId(),"haru"))
+			.isInstanceOfSatisfying(SignupProfileException.class,e->assertThat(e.getFailure()).isEqualTo(SignupProfileFailure.NICKNAME_UNAVAILABLE));
+	}
+
+	@Test void defaultNicknameStillRequiresASelectableCharacterAndExplicitCompletion() {
+		User user=users.saveAndFlush(User.pending("haru@example.com",null,"haru",1L));
+
+		assertThatThrownBy(()->service.completeSignupProfile(user.getId(),"haru",9L))
+			.isInstanceOfSatisfying(SignupProfileException.class,e->assertThat(e.getFailure()).isEqualTo(SignupProfileFailure.INVALID_CHARACTER));
+
+		assertThat(users.findById(user.getId()).orElseThrow().isProfileSetupRequired()).isTrue();
+	}
+
+	@Test void legacyPendingPrefixCannotBeConfirmedAsAnOwnedDefault() {
+		User user=users.saveAndFlush(User.pending("old@example.com",null,"가입대기_old",1L));
+
+		assertThatThrownBy(()->service.completeSignupProfile(user.getId(),"가입대기_old",1L))
+			.isInstanceOfSatisfying(SignupProfileException.class,e->assertThat(e.getFailure()).isEqualTo(SignupProfileFailure.INVALID_NICKNAME));
+
+		assertThat(users.findById(user.getId()).orElseThrow().isProfileSetupRequired()).isTrue();
+	}
+
 	@Test void normalizedSignupHoldRejectsAnotherMemberAndSupportsCompletionRetry() {
 		User first=users.saveAndFlush(User.pending("first@example.com",null,"가입대기_first",1L));
 		User second=users.saveAndFlush(User.pending("second@example.com",null,"가입대기_second",1L));

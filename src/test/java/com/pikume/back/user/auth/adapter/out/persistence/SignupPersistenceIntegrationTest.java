@@ -23,6 +23,56 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class SignupPersistenceIntegrationTest extends SignupPersistenceTestSupport {
+ @org.junit.jupiter.params.ParameterizedTest
+ @org.junit.jupiter.params.provider.CsvSource({
+  "haru@example.com,haru",
+  "Haru.note+tag@example.com,Haru.note+tag",
+  "abcdefghijklmnopqrstuv@example.com,abcdefghijklmnopqrst",
+  "+_.-@example.com,+_.-"
+ })
+ void consentStoresEmailLocalPartAsDefaultAndReplayKeepsIt(String email,String nickname) {
+  String raw=emailProof(email);
+  var command=new SignupAgreementCommand(raw,"caller",agreements);
+
+  var result=service.agree(command);
+  var replay=service.agree(command);
+  User saved=tx.required(()->store.findUser(result.progress().userId()).orElseThrow());
+
+  assertThat(saved.getNickname()).isEqualTo(nickname).doesNotContain("@");
+  assertThat(saved.isProfileSetupRequired()).isTrue();
+  assertThat(replay.progress().userId()).isEqualTo(saved.getId());
+  assertThat(count("User")).isEqualTo(1);
+ }
+
+ @Test void defaultNicknameAvoidsNamesOwnedByExistingMembers() {
+  tx.required(()->store.createUser(new User("owner@example.com","hash","haru",5L)));
+
+  var result=service.agree(new SignupAgreementCommand(emailProof("haru@example.com"),"caller",agreements));
+
+  assertThat((String)tx.required(()->store.findUser(result.progress().userId()).orElseThrow().getNickname()))
+   .matches("haru[0-9]{4}");
+ }
+
+ @Test void defaultNicknameRespectsAnotherMembersActiveReservation() {
+  User owner=tx.required(()->store.createUser(new User("owner@example.com","hash","owner",5L)));
+  tx.required(()->nicknameHolds.tryAcquire(new com.pikume.back.user.domain.vo.Nickname("haru"),owner.getId(),Instant.now()));
+
+  var result=service.agree(new SignupAgreementCommand(emailProof("haru@example.com"),"caller",agreements));
+
+  assertThat((String)tx.required(()->store.findUser(result.progress().userId()).orElseThrow().getNickname()))
+   .matches("haru[0-9]{4}");
+  assertThat((Boolean)tx.required(()->nicknameHolds.isHeldBy(new com.pikume.back.user.domain.vo.Nickname("haru"),owner.getId(),Instant.now()))).isTrue();
+ }
+
+ @Test void defaultCollisionSuffixKeepsNicknameWithinTwentyCharacters() {
+  tx.required(()->store.createUser(new User("owner@example.com","hash","abcdefghijklmnopqrst",5L)));
+
+  var result=service.agree(new SignupAgreementCommand(emailProof("abcdefghijklmnopqrstuv@example.com"),"caller",agreements));
+
+  assertThat((String)tx.required(()->store.findUser(result.progress().userId()).orElseThrow().getNickname()))
+   .matches("abcdefghijklmnop[0-9]{4}").hasSize(20);
+ }
+
  @Test void failedCodeAttemptsCommitDespitePublicExceptionAndCorrectCodeThenCannotBypassLimit() {
   var c=service.sendEmailCode(new EmailSignupChallengeCommand("a@gmail.com","caller","origin",null,null));
   for(int i=0;i<2;i++)assertThatThrownBy(() -> service.authenticateEmail(new EmailSignupAuthenticationCommand(c.challengeId(),"a@gmail.com","000000","Password!","caller")))
