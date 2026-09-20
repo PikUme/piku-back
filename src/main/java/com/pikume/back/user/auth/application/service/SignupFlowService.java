@@ -11,6 +11,7 @@ import com.pikume.back.user.auth.application.dto.SignupConfiguration;
 import com.pikume.back.user.auth.application.dto.SignupNextAction;
 import com.pikume.back.user.auth.application.dto.SignupProgress;
 import com.pikume.back.user.auth.application.dto.SignupProofResult;
+import com.pikume.back.user.auth.application.dto.SocialSignupAuthenticationCommand;
 import com.pikume.back.user.auth.application.dto.SocialSignupEmailCommand;
 import com.pikume.back.user.auth.application.exception.SignupFailure;
 import com.pikume.back.user.auth.application.exception.SignupFlowException;
@@ -179,7 +180,54 @@ public class SignupFlowService implements SignupFlowUseCase, QuerySignupAgreemen
         return completedAttempt(result);
     }
 
+    @Override
+    public SignupProofResult authenticateSocial(SocialSignupAuthenticationCommand command) {
+        if (!"GOOGLE".equals(command.provider())) throw fail(PROVIDER_NOT_SUPPORTED);
+        requiredHash(command.callerBinding());
+        if (command.subject()==null || command.subject().isBlank() || command.subject().length()>255) throw fail(INVALID_REQUEST);
+        try {
+            return tx(() -> authenticateSocialInTransaction(command));
+        } catch (SignupFlowException conflict) {
+            if (conflict.getReason()!=ACCOUNT_LINK_CONFLICT) throw conflict;
+            // A racing transaction has ended. Only the exact verified subject may recover its linked user.
+            return tx(() -> {
+                var account=store.findAccount(command.provider(), command.subject()).orElseThrow(() -> conflict);
+                if (command.targetUserId()!=null && !command.targetUserId().equals(account.getUserId())) throw conflict;
+                return existingResult(activeUser(account.getUserId()));
+            });
+        }
+    }
 
+    private SignupProofResult authenticateSocialInTransaction(SocialSignupAuthenticationCommand c) {
+        var account = store.findAccount(c.provider(), c.subject());
+        if (account.isPresent()) {
+            if (c.targetUserId()!=null && !c.targetUserId().equals(account.get().getUserId())) throw fail(ACCOUNT_LINK_CONFLICT);
+            return existingResult(activeUser(account.get().getUserId()));
+        }
+        requireEnabled();
+        if (c.targetUserId()!=null) {
+            User target=activeUser(c.targetUserId());
+            link(target.getId(), c.provider(), c.subject(), Instant.now());
+            return existingResult(target);
+        }
+        String email = c.email()!=null && c.emailVerified() && c.emailAuthoritative() ? validSignupEmail(c.email()) : null;
+        if (email != null) {
+            var user=store.findUserByEmail(email);
+            if (user.isPresent()) {
+                User existing=user.get();
+                if (existing.isWithdrawn()) throw fail(USER_UNAVAILABLE);
+                if (!email.toLowerCase(Locale.ROOT).endsWith("@gmail.com") || !email.equalsIgnoreCase(existing.getEmail())
+                || existing.getPassword()==null || existing.getPassword().isBlank() || !policy.legacyEmailAccountsVerified())
+                throw fail(ACCOUNT_LINK_CONFLICT);
+                link(existing.getId(), c.provider(), c.subject(), Instant.now());
+                return existingResult(existing);
+            }
+        }
+        String raw=token();
+        SignupAuthentication proof=SignupAuthentication.social(hash(raw), hash(c.callerBinding()), c.provider(), c.subject(), email, Instant.now());
+        store.saveProof(proof);
+        return new SignupProofResult(raw, proofProgress(proof));
+    }
 
     @Override
     public SignupProofResult agree(SignupAgreementCommand command) {
@@ -326,7 +374,9 @@ public class SignupFlowService implements SignupFlowUseCase, QuerySignupAgreemen
         return user;
     }
 
-
+    private SignupProofResult existingResult(User u) {
+        return new SignupProofResult(null, userProgress(u, null));
+    }
 
     private SignupProgress userProgress(User u, Instant expiresAt) {
         return new SignupProgress(u.isProfileSetupRequired()?SignupNextAction.PROFILE:SignupNextAction.COMPLETE, u.getEmail(), u.getId(), u.getProfileSetupStatus().name(), expiresAt);

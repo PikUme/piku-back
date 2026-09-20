@@ -83,8 +83,17 @@ class SignupPersistenceIntegrationTest extends SignupPersistenceTestSupport {
    assertThat(values).contains(SignupFailure.EMAIL_ALREADY_REGISTERED);assertThat(count("User")).isEqualTo(1);
   } finally {pool.shutdownNow();}
  }
-
-
+ @Test void parallelSocialProofsRecoverOnlyExactLinkedSubject() throws Exception {
+  var a=service.authenticateSocial(new SocialSignupAuthenticationCommand("GOOGLE","Subject","same@gmail.com",true,true,"caller",null));
+  var b=service.authenticateSocial(new SocialSignupAuthenticationCommand("GOOGLE","Subject","different@gmail.com",true,true,"caller",null));
+  var pool=Executors.newFixedThreadPool(2);var start=new CountDownLatch(1);
+  try {
+   var first=pool.submit(() -> {start.await();return service.agree(new SignupAgreementCommand(a.proof(),"caller",agreements));});
+   var second=pool.submit(() -> {start.await();return service.agree(new SignupAgreementCommand(b.proof(),"caller",agreements));});
+   start.countDown();assertThat(first.get(10,TimeUnit.SECONDS).progress().userId()).isEqualTo(second.get(10,TimeUnit.SECONDS).progress().userId());
+   assertThat(count("User")).isEqualTo(1);assertThat(count("UserOAuthAccount")).isEqualTo(1);assertThat(count("UserAgreement")).isEqualTo(1);
+  } finally {pool.shutdownNow();}
+ }
  @Test void cleanupPurgesExpiredProofAndChallengeButPreservesAbandonedUser() {
   tx.required(() -> {
    store.saveProof(SignupAuthentication.email(SignupFlowService.hash("expired"),SignupFlowService.hash("caller"),"a@gmail.com","hash",Instant.now().minusSeconds(601)));

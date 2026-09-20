@@ -310,10 +310,7 @@ class SignupConcurrencyMySqlIntegrationTest extends SignupPersistenceTestSupport
         return service.sendEmailCode(new EmailSignupChallengeCommand("code@gmail.com","caller","origin",challenge.id(),challenge.proof()));
     }
     private String socialProof(String subject,String email) {
-        String raw=java.util.UUID.randomUUID().toString();
-        tx.required(()->{store.saveProof(com.pikume.back.user.auth.domain.SignupAuthentication.social(
-            SignupFlowService.hash(raw),SignupFlowService.hash("caller"),"GOOGLE",subject,email,Instant.now()));return null;});
-        return raw;
+        return service.authenticateSocial(new SocialSignupAuthenticationCommand("GOOGLE",subject,email,true,true,"caller",null)).proof();
     }
     private void awaitDatabaseWait() {
         await().atMost(Duration.ofSeconds(8)).until(()->observer.queryForObject("SELECT COUNT(*) FROM performance_schema.data_lock_waits",Long.class)>0);

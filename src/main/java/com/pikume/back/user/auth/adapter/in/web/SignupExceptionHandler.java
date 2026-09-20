@@ -3,6 +3,7 @@ package com.pikume.back.user.auth.adapter.in.web;
 import com.pikume.back.global.error.ApiProblemType;
 import com.pikume.back.global.error.ProblemDetailFactory;
 import com.pikume.back.user.application.exception.SignupProfileException;
+import com.pikume.back.user.auth.application.exception.GoogleAuthenticationException;
 import com.pikume.back.user.auth.application.exception.InvalidCredentialsException;
 import com.pikume.back.user.auth.application.exception.SignupFlowException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -77,14 +78,28 @@ public class SignupExceptionHandler {
         return response(error.getReason().name(),status,"가입 요청의 출처와 인증 정보를 확인해주세요.",request);
     }
 
-
+    @ExceptionHandler(GoogleAuthenticationException.class)
+    public ResponseEntity<ProblemDetail> google(GoogleAuthenticationException error, HttpServletRequest request) {
+        HttpStatus status = error.getReason() == GoogleAuthenticationException.Reason.INVALID_IDENTITY ? HttpStatus.UNAUTHORIZED : HttpStatus.SERVICE_UNAVAILABLE;
+        return response("GOOGLE_" + error.getReason().name(),status,"Google 인증을 완료하지 못했습니다. 로그인을 다시 시작해주세요.",request);
+    }
 
     @ExceptionHandler(InvalidCredentialsException.class)
     public ResponseEntity<ProblemDetail> credentials(InvalidCredentialsException error, HttpServletRequest request) {
         return response("INVALID_CREDENTIALS",HttpStatus.UNAUTHORIZED,"기존 로그인 방법으로 본인 인증을 다시 수행해주세요.",request);
     }
 
-
+    @ExceptionHandler(com.pikume.back.user.auth.domain.exception.OAuthRequestException.class)
+    public ResponseEntity<ProblemDetail> oauth(com.pikume.back.user.auth.domain.exception.OAuthRequestException error, HttpServletRequest request) {
+        HttpStatus status = switch (error.getReason()) {
+            case DISABLED, CONFIGURATION -> HttpStatus.SERVICE_UNAVAILABLE;
+            case EXPIRED -> HttpStatus.GONE;
+            case REPLAY -> HttpStatus.CONFLICT;
+            case RATE_LIMITED -> HttpStatus.TOO_MANY_REQUESTS;
+            default -> HttpStatus.BAD_REQUEST;
+        };
+        return response("OAUTH_" + error.getReason().name(),status,"Google 로그인 요청을 다시 시작해주세요.",request);
+    }
 
     private ResponseEntity<ProblemDetail> response(String code, HttpStatus status, String detail, HttpServletRequest request) {
         var descriptor = new SignupProblem(URI.create("https://api.pikume.com/problems/signup/" + code.toLowerCase(Locale.ROOT).replace('_','-')),status,status.getReasonPhrase());
