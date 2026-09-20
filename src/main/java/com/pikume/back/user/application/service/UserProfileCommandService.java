@@ -152,7 +152,8 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 			throw new SignupProfileException(SignupProfileFailure.PROFILE_ALREADY_COMPLETED);
 		}
 		Instant now = Instant.now();
-		if (checkUserUniquenessPort.isNicknameInUse(requestedNickname)
+		boolean ownsNickname=requestedNickname.value().equals(user.getNickname());
+		if ((!ownsNickname && checkUserUniquenessPort.isNicknameInUse(requestedNickname))
 				|| !nicknameHoldPort.tryAcquire(requestedNickname, userId, now)) {
 			throw new SignupProfileException(SignupProfileFailure.NICKNAME_UNAVAILABLE);
 		}
@@ -174,11 +175,13 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 			throw new SignupProfileException(SignupProfileFailure.PROFILE_ALREADY_COMPLETED);
 		}
 		validateFinalNickname(requestedNickname);
-		if (!nicknameHoldPort.isHeldBy(requestedNickname, userId, Instant.now())) {
-			throw new SignupProfileException(SignupProfileFailure.HOLD_REQUIRED);
-		}
-		if (checkUserUniquenessPort.isNicknameInUse(requestedNickname)) {
-			throw new SignupProfileException(SignupProfileFailure.NICKNAME_UNAVAILABLE);
+		if (!requestedNickname.value().equals(user.getNickname())) {
+			if (!nicknameHoldPort.isHeldBy(requestedNickname, userId, Instant.now())) {
+				throw new SignupProfileException(SignupProfileFailure.HOLD_REQUIRED);
+			}
+			if (checkUserUniquenessPort.isNicknameInUse(requestedNickname)) {
+				throw new SignupProfileException(SignupProfileFailure.NICKNAME_UNAVAILABLE);
+			}
 		}
 		if (characterId == null || characterId <= 0
 				|| fixedCharacterAvatarPort.resolveFixedCharacterObjectKey(characterId).isEmpty()) {
@@ -186,7 +189,7 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 		}
 		user.completeProfile(requestedNickname, characterId);
 		recordUserAccountPort.recordUserAccount(user);
-		nicknameHoldPort.release(requestedNickname, userId);
+		nicknameHoldPort.releaseForUser(userId);
 		return signupProfileResult(user);
 	}
 

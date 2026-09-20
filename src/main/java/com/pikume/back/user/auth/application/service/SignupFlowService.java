@@ -35,6 +35,10 @@ import com.pikume.back.user.auth.domain.Verification;
 import com.pikume.back.user.auth.domain.exception.SignupProofException;
 import com.pikume.back.user.domain.User;
 import com.pikume.back.user.domain.service.PasswordPolicy;
+import com.pikume.back.user.domain.service.DefaultSignupNicknamePolicy;
+import com.pikume.back.user.domain.vo.Nickname;
+import com.pikume.back.user.application.port.out.NicknameHoldPort;
+import com.pikume.back.user.application.port.out.CheckUserUniquenessPort;
 import com.pikume.back.user.domain.vo.Email;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -78,6 +82,10 @@ public class SignupFlowService implements SignupFlowUseCase, QuerySignupAgreemen
     private final PasswordPolicy passwordPolicy;
 
     private final QueryAllowedEmailUseCase allowedEmails;
+
+    private final NicknameHoldPort nicknameHolds;
+
+    private final CheckUserUniquenessPort userUniqueness;
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
@@ -248,7 +256,10 @@ public class SignupFlowService implements SignupFlowUseCase, QuerySignupAgreemen
 
     private SignupProofResult agreeInTransaction(SignupAgreementCommand command, String fingerprint) {
         SignupAuthentication proof=loadProof(command.proof(), command.callerBinding());
+        // Acquire before any snapshot reads: generated defaults compete with every nickname writer.
+        nicknameHolds.lockNicknameWrites();
         Instant now=Instant.now();
+        proof.requireUsable(requiredHash(command.callerBinding()),now);
         proof.requireConsentReady();
         String completed=proof.completedUser(fingerprint, now);
         if (completed!=null) return new SignupProofResult(command.proof(), userProgress(activeUser(completed), proof.getExpiresAt()));
@@ -261,7 +272,8 @@ public class SignupFlowService implements SignupFlowUseCase, QuerySignupAgreemen
         if (store.findUserByEmail(proof.getVerifiedEmail()).isPresent()) throw fail(EMAIL_ALREADY_REGISTERED);
         Long characterId=characters.resolveDefaultSignupCharacter();
         if (characterId==null || characterId<=0) throw fail(DEFAULT_CHARACTER_UNAVAILABLE);
-        User user=store.createUser(User.pending(proof.getVerifiedEmail(), proof.getPasswordHash(), "가입대기_"+token().substring(0, 14), characterId));
+        Nickname defaultNickname=availableDefaultNickname(proof.getVerifiedEmail());
+        User user=store.createUser(User.pending(proof.getVerifiedEmail(), proof.getPasswordHash(), defaultNickname.value(), characterId));
         for (AgreementAcceptance acceptance:command.agreements()) {
             SignupAgreementDocument d=documents.stream().filter(v -> v.type().equals(acceptance.type())).findFirst().orElseThrow();
             store.recordAgreement(new UserAgreement(user.getId(), d.type(), d.version(), d.content(), acceptance.agreed(), now));
@@ -269,6 +281,15 @@ public class SignupFlowService implements SignupFlowUseCase, QuerySignupAgreemen
         if ("SOCIAL".equals(proof.getMethod())) link(user.getId(), proof.getProvider(), proof.getProviderSubject(), now);
         proof.consume(user.getId(), fingerprint, now);
         return new SignupProofResult(command.proof(), new SignupProgress(SignupNextAction.PROFILE, user.getEmail(), user.getId(), "REQUIRED", proof.getExpiresAt()));
+    }
+
+    private Nickname availableDefaultNickname(String email) {
+        for(int attempt=0;attempt<20;attempt++) {
+            int suffix=attempt==0?0:1000+RANDOM.nextInt(9000);
+            Nickname candidate=DefaultSignupNicknamePolicy.candidate(email,suffix);
+            if(!userUniqueness.isNicknameInUse(candidate) && !nicknameHolds.isHeld(candidate,Instant.now())) return candidate;
+        }
+        throw fail(NICKNAME_COLLISION);
     }
 
     private SignupProofResult recoverSocialConsent(SignupAgreementCommand c, String fingerprint, SignupFlowException original) {

@@ -8,11 +8,15 @@ import com.pikume.back.user.auth.application.service.SignupFlowService;
 import com.pikume.back.user.auth.domain.*;
 import com.pikume.back.user.domain.User;
 import com.pikume.back.user.domain.service.PasswordPolicy;
+import com.pikume.back.user.adapter.out.persistence.NicknameHoldPersistenceAdapter;
+import com.pikume.back.user.adapter.out.persistence.UserAccountPersistenceAdapter;
+import com.pikume.back.user.application.port.out.NicknameHoldPort;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,13 +27,16 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 @DataJpaTest
-@Import({SignupPersistenceAdapter.class,SignupTransactionAdapter.class,SignupFlowService.class,PasswordPolicy.class})
+@Import({SignupPersistenceAdapter.class,SignupTransactionAdapter.class,SignupFlowService.class,PasswordPolicy.class,
+ NicknameHoldPersistenceAdapter.class,UserAccountPersistenceAdapter.class})
 @Transactional(propagation=Propagation.NOT_SUPPORTED)
 abstract class SignupPersistenceTestSupport {
  @Autowired SignupFlowService service;
  @Autowired SignupStorePort store;
  @Autowired SignupTransactionPort tx;
  @Autowired EntityManager em;
+ @Autowired JdbcTemplate jdbc;
+ @Autowired NicknameHoldPort nicknameHolds;
  @MockitoBean SignupPolicyPort policy;
  @MockitoBean PasswordProtectionPort passwords;
  @MockitoBean IssueVerificationEmailPort sender;
@@ -38,6 +45,10 @@ abstract class SignupPersistenceTestSupport {
  @MockitoBean QueryAllowedEmailUseCase allowed;
  final List<AgreementAcceptance> agreements=List.of(new AgreementAcceptance("TERMS","v1",true));
  @BeforeEach void setup() {
+  jdbc.execute("CREATE TABLE IF NOT EXISTS nickname_write_mutex (id INT PRIMARY KEY)");
+  jdbc.execute("CREATE TABLE IF NOT EXISTS nickname_holds (nickname VARCHAR(255) PRIMARY KEY, user_id VARCHAR(36) NOT NULL UNIQUE, expires_at TIMESTAMP(6) NOT NULL)");
+  jdbc.update("INSERT INTO nickname_write_mutex (id) SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM nickname_write_mutex WHERE id=1)");
+  jdbc.update("DELETE FROM nickname_holds");
   tx.required(() -> {
    em.createQuery("delete from UserAgreement").executeUpdate();em.createQuery("delete from UserOAuthAccount").executeUpdate();
    em.createQuery("delete from SignupAuthentication").executeUpdate();em.createQuery("delete from Verification").executeUpdate();

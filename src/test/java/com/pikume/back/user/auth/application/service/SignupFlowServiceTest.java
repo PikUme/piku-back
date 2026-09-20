@@ -20,6 +20,8 @@ class SignupFlowServiceTest {
     final PasswordProtectionPort passwords = mock(PasswordProtectionPort.class);
     final ResolveDefaultSignupCharacterPort character = mock(ResolveDefaultSignupCharacterPort.class);
     final SignUpUseCase legacy = mock(SignUpUseCase.class);
+    final com.pikume.back.user.application.port.out.NicknameHoldPort nicknameHolds = mock(com.pikume.back.user.application.port.out.NicknameHoldPort.class);
+    final com.pikume.back.user.application.port.out.CheckUserUniquenessPort uniqueness = mock(com.pikume.back.user.application.port.out.CheckUserUniquenessPort.class);
     final Instant now = Instant.now();
     final SignupTransactionPort tx = new SignupTransactionPort() { public <T> T required(Supplier<T> work) { return work.get(); }};
     SignupFlowService service;
@@ -30,7 +32,7 @@ class SignupFlowServiceTest {
         when(character.resolveDefaultSignupCharacter()).thenReturn(9L);
         var allowed = mock(com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase.class);
         when(allowed.isEmailAllowed(anyString())).thenReturn(true);
-        service = new SignupFlowService(store, tx, policy, passwords, mock(IssueVerificationEmailPort.class), character, legacy, new PasswordPolicy(), allowed);
+        service = new SignupFlowService(store, tx, policy, passwords, mock(IssueVerificationEmailPort.class), character, legacy, new PasswordPolicy(), allowed, nicknameHolds, uniqueness);
         when(store.createUser(any())).thenAnswer(i -> { User u=i.getArgument(0); return new User("u1",u.getEmail(),u.getPassword(),u.getNickname(),u.getCharacterId()); });
     }
     void proof(SignupAuthentication p) { when(store.lockProof(anyString())).thenReturn(Optional.of(p)); }
@@ -70,8 +72,19 @@ class SignupFlowServiceTest {
     @Test void socialConsentKeepsPasswordNull() {
         proof(SignupAuthentication.social(SignupFlowService.hash("proof"),SignupFlowService.hash("caller"),"GOOGLE","Subject","new@gmail.com",now));
         service.agree(new SignupAgreementCommand("proof","caller",consent));
-        verify(store).createUser(argThat(u -> u.getPassword()==null && u.isProfileSetupRequired()));
+        verify(store).createUser(argThat(u -> u.getPassword()==null && u.isProfileSetupRequired() && u.getNickname().equals("new")));
         verify(store).createAccount(any());
+    }
+    @Test void unavailableDefaultCandidatesLeaveProofUnconsumedAndCreateNoUser() {
+        var proof=emailProof();proof(proof);
+        when(uniqueness.isNicknameInUse(any())).thenReturn(true);
+
+        assertThatThrownBy(()->service.agree(new SignupAgreementCommand("proof","caller",consent)))
+            .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.NICKNAME_COLLISION);
+
+        assertThat(proof.getConsumedAt()).isNull();
+        verify(store,never()).createUser(any());
+        verify(store,never()).recordAgreement(any());
     }
     @Test void missingDefaultCharacterStopsConsentBeforeWrites() {
         proof(emailProof());when(character.resolveDefaultSignupCharacter()).thenThrow(new SignupFlowException(SignupFailure.DEFAULT_CHARACTER_UNAVAILABLE));
