@@ -76,16 +76,16 @@ public class SignupAuthentication {
     }
 
     public static SignupAuthentication social(String tokenHash, String callerHash, String provider,
-                                                String subject, String trustedEmail, Instant now) {
+                                                String subject, String providerEmail, Instant now) {
         if (provider == null || provider.isBlank() || subject == null || subject.isBlank())
             throw new SignupProofException(INVALID);
         var proof = new SignupAuthentication(tokenHash, callerHash, "SOCIAL", now);
         proof.provider = provider;
         proof.providerSubject = subject;
-        if (trustedEmail != null) {
-            proof.verifyEmail(trustedEmail, now);
-            proof.emailVerificationSource = "PROVIDER";
-        }
+        if (providerEmail == null || providerEmail.isBlank() || providerEmail.length() > 255)
+            throw new SignupProofException(INVALID);
+        proof.verifyEmail(providerEmail, now);
+        proof.emailVerificationSource = "PROVIDER";
         return proof;
     }
 
@@ -98,24 +98,12 @@ public class SignupAuthentication {
 
     public void requireConsentReady() {
         if (!"CHAPTERED".equals(flowType)) throw new SignupProofException(FLOW_MISMATCH);
-        if (verifiedEmail == null) throw new SignupProofException(EMAIL_REQUIRED);
+        if (verifiedEmail == null || verifiedEmail.isBlank()) throw new SignupProofException(INVALID);
         if (consumedAt == null && "EMAIL".equals(method) && passwordHash == null)
             throw new SignupProofException(INVALID);
     }
 
-    public void beginEmailVerification(String finalEmail, Instant now) {
-        requireUnexpired(now);
-        if (consumedAt != null) throw new SignupProofException(ALREADY_USED);
-        if (!"SOCIAL".equals(method) || !"CHAPTERED".equals(flowType)) throw new SignupProofException(FLOW_MISMATCH);
-        String email = new Email(finalEmail).value();
-        if (!Objects.equals(verifiedEmail, email)) {
-            this.verifiedEmail = null;
-            this.emailVerifiedAt = null;
-            this.emailVerificationSource = null;
-        }
-    }
-
-    public void verifyEmail(String email, Instant now) {
+    private void verifyEmail(String email, Instant now) {
         requireUnexpired(now);
         if (consumedAt != null) throw new SignupProofException(ALREADY_USED);
         this.verifiedEmail = new Email(email).value();

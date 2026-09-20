@@ -22,6 +22,7 @@ class SignupFlowServiceTest {
     final SignUpUseCase legacy = mock(SignUpUseCase.class);
     final com.pikume.back.user.application.port.out.NicknameHoldPort nicknameHolds = mock(com.pikume.back.user.application.port.out.NicknameHoldPort.class);
     final com.pikume.back.user.application.port.out.CheckUserUniquenessPort uniqueness = mock(com.pikume.back.user.application.port.out.CheckUserUniquenessPort.class);
+    final com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase allowed = mock(com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase.class);
     final Instant now = Instant.now();
     final SignupTransactionPort tx = new SignupTransactionPort() { public <T> T required(Supplier<T> work) { return work.get(); }};
     SignupFlowService service;
@@ -30,18 +31,93 @@ class SignupFlowServiceTest {
         when(policy.enabled()).thenReturn(true);
         when(policy.agreements()).thenReturn(List.of(new SignupAgreementDocument("TERMS", "v1", "actual terms", true)));
         when(character.resolveDefaultSignupCharacter()).thenReturn(9L);
-        var allowed = mock(com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase.class);
         when(allowed.isEmailAllowed(anyString())).thenReturn(true);
         service = new SignupFlowService(store, tx, policy, passwords, mock(IssueVerificationEmailPort.class), character, legacy, new PasswordPolicy(), allowed, nicknameHolds, uniqueness);
         when(store.createUser(any())).thenAnswer(i -> { User u=i.getArgument(0); return new User("u1",u.getEmail(),u.getPassword(),u.getNickname(),u.getCharacterId()); });
     }
     void proof(SignupAuthentication p) { when(store.lockProof(anyString())).thenReturn(Optional.of(p)); }
     SignupAuthentication emailProof() { return SignupAuthentication.email(SignupFlowService.hash("proof"), SignupFlowService.hash("caller"), "new@gmail.com", "once-hashed", now); }
-    @Test void socialWithoutTrustedEmailRequiresVerificationAndCreatesNoUser() {
-        var result=service.authenticateSocial(new SocialSignupAuthenticationCommand("GOOGLE","CaseSubject","x@example.com",true,false,"caller",null));
-        assertThat(result.progress().nextAction()).isEqualTo(SignupNextAction.VERIFY_EMAIL);
-        verify(store,never()).createUser(any());
+
+
+    @Test void oldSocialProofWithoutEmailCannotResumeOrCreateAMember() {
+        var pending = SignupAuthentication.social(SignupFlowService.hash("proof"), SignupFlowService.hash("caller"), "GOOGLE", "Subject", "provider@naver.com", now);
+        org.springframework.test.util.ReflectionTestUtils.setField(pending, "verifiedEmail", null);
+        proof(pending);
+
+        assertThatThrownBy(() -> service.progress("proof", "caller"))
+            .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.PROOF_INVALID);
+        assertThatThrownBy(() -> service.agree(new SignupAgreementCommand("proof", "caller", consent)))
+            .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.PROOF_INVALID);
+
+        verify(store, never()).createUser(any());
+        verify(store, never()).recordAgreement(any());
     }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"member@naver.com,false,false","member@naver.com,true,false","member@gmail.com,false,false","member@workspace.example,true,true"})
+    void providerEmailStartsConsentWithoutServiceEmailVerification(String email,boolean verified,boolean authoritative) {
+        var result=service.authenticateSocial(new SocialSignupAuthenticationCommand("GOOGLE","NewSubject",email,verified,authoritative,"caller",null));
+
+        assertThat(result.progress().nextAction()).isEqualTo(SignupNextAction.AGREEMENTS);
+        assertThat(result.progress().email()).isEqualTo(email);
+        assertThat(result.proof()).isNotBlank();
+        verify(store).saveProof(argThat(p->p.getVerifiedEmail().equals(email)&&p.getEmailVerificationSource().equals("PROVIDER")&&p.getPasswordHash()==null));
+        verify(store,never()).createUser(any());
+        verify(store,never()).createAccount(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.NullAndEmptySource
+    @org.junit.jupiter.params.provider.ValueSource(strings={" "})
+    void missingProviderEmailCreatesNeitherProofNorMember(String email) {
+        assertThatThrownBy(()->service.authenticateSocial(new SocialSignupAuthenticationCommand("GOOGLE","NewSubject",email,false,false,"caller",null)))
+            .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.EMAIL_REQUIRED);
+        verify(store,never()).saveProof(any());
+        verify(store,never()).createUser(any());
+        verify(store,never()).createAccount(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"invalid", "member@blocked.example", "too-long"})
+    void invalidProviderEmailCreatesNeitherProofNorMember(String input) {
+        String email=input.equals("too-long")?"a".repeat(246)+"@gmail.com":input;
+        when(allowed.isEmailAllowed("member@blocked.example")).thenReturn(false);
+        assertThatThrownBy(()->service.authenticateSocial(new SocialSignupAuthenticationCommand("GOOGLE","NewSubject",email,false,false,"caller",null)))
+            .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.INVALID_EMAIL);
+        verify(store,never()).saveProof(any());
+        verify(store,never()).createUser(any());
+        verify(store,never()).createAccount(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,false","false,true","true,false"})
+    void gmailAutomaticLinkStillRequiresBothEmailTrustFacts(boolean verified,boolean authoritative) {
+        when(policy.legacyEmailAccountsVerified()).thenReturn(true);
+        when(store.findUserByEmail("member@gmail.com")).thenReturn(Optional.of(new User("existing","member@gmail.com","password-hash","member",9L)));
+
+        assertThatThrownBy(()->service.authenticateSocial(new SocialSignupAuthenticationCommand("GOOGLE","NewSubject","member@gmail.com",verified,authoritative,"caller",null)))
+            .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.ACCOUNT_LINK_CONFLICT);
+        verify(store,never()).createAccount(any());
+        verify(store,never()).saveProof(any());
+    }
+
+    @Test void externalEmailMatchNeverAutomaticallyLinksEvenWhenProviderMarksItVerified() {
+        when(policy.legacyEmailAccountsVerified()).thenReturn(true);
+        when(store.findUserByEmail("member@naver.com")).thenReturn(Optional.of(new User("existing","member@naver.com","password-hash","member",9L)));
+        assertThatThrownBy(()->service.authenticateSocial(new SocialSignupAuthenticationCommand("GOOGLE","NewSubject","member@naver.com",true,true,"caller",null)))
+            .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.ACCOUNT_LINK_CONFLICT);
+        verify(store,never()).createAccount(any());
+    }
+
+    @Test void explicitReauthenticatedTargetDoesNotNeedProviderEmailForNewAccountLink() {
+        when(store.findUser("target")).thenReturn(Optional.of(new User("target","member@naver.com","hash","member",9L)));
+        var result=service.authenticateSocial(new SocialSignupAuthenticationCommand("GOOGLE","NewSubject",null,false,false,"caller","target"));
+        assertThat(result.progress().userId()).isEqualTo("target");
+        verify(store).createAccount(argThat(a->a.getUserId().equals("target")&&a.getProviderSubject().equals("NewSubject")));
+        verify(store,never()).saveProof(any());
+        verifyNoInteractions(allowed);
+    }
+
     @Test void consentStoresActualVersionedContentAndClearsPasswordHash() {
         var p=emailProof();proof(p);
         var result=service.agree(new SignupAgreementCommand("proof","caller",consent));
@@ -150,10 +226,10 @@ class SignupFlowServiceTest {
         when(policy.maxCodeAttempts()).thenReturn(1);
         Instant issuedAt = rejection.equals("EXPIRED") ? now.minusSeconds(301) : now;
         Verification challenge = Verification.signupChallenge("challenge", "new@gmail.com",
-                SignupFlowService.hash("caller"), null, issuedAt, 60);
+                SignupFlowService.hash("caller"), issuedAt, 60);
         challenge.activateSignupCode("123456", issuedAt);
         if (rejection.equals("EXHAUSTED")) {
-            challenge.validateSignup("new@gmail.com", SignupFlowService.hash("caller"), null, "000000", now, 1);
+            challenge.validateSignup("new@gmail.com", SignupFlowService.hash("caller"), "000000", now, 1);
         }
         if (rejection.equals("CONSUMED")) challenge.consumeSignup(now);
         when(store.lockChallenge("challenge")).thenReturn(rejection.equals("MISSING") ? Optional.empty() : Optional.of(challenge));
@@ -178,7 +254,7 @@ class SignupFlowServiceTest {
     void successfulEmailChallengeHashesOnceAfterValidationAndStoresTheHash() {
         when(policy.maxCodeAttempts()).thenReturn(1);
         Verification challenge = Verification.signupChallenge("challenge", "new@gmail.com",
-                SignupFlowService.hash("caller"), null, now, 60);
+                SignupFlowService.hash("caller"), now, 60);
         challenge.activateSignupCode("123456", now);
         when(store.lockChallenge("challenge")).thenReturn(Optional.of(challenge));
         when(passwords.protect("Password!")).thenReturn("protected-once");

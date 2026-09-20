@@ -3,7 +3,7 @@
 - Status: 활성화 전 운영 기준
 - Audience: 백엔드·운영 담당자
 - Source of Truth: Yes
-- Last Reviewed: 2026-09-19
+- Last Reviewed: 2026-09-21
 
 ## 선행 조건과 활성화
 
@@ -62,3 +62,10 @@ Google 검증 실패·코드 교환 실패·요청 제한·DB 잠금 대기와 �
 일반 테스트와 실제 MySQL migration 태그 테스트를 구분한다. 실제 MySQL에서 OAuth subject 비교, 요청 claim·완료·재사용 방지와 연결 커밋 후 완료 기록 장애를 검증한다. Google HTTP·서명 검증과 외부 메일 발송의 테스트 대역은 운영 Google 계정·실제 메일 연동 증거가 아니다.
 
 활성화 전 실제 Google 웹 redirect URI와 코드 교환·서명 키 조회, 모바일 registration 및 토큰 audience·authorized party·nonce, 앱 복귀·재시작 복구, 실제 웹·API 도메인의 HTTPS 쿠키·Origin·CORS·303 후 세션 복구, 모든 인스턴스의 암호화 키 일치를 확인한다. 기존 이메일 인증 출처, 약관·기본 캐릭터 등 선행 가입 준비도 확인하되 비밀값 자체는 기록하지 않는다.
+
+## 소셜 이메일 필수 정책 전환
+
+- 신규 Google 신원은 제공자 이메일의 존재·형식·최대 255자·기존 허용 도메인을 확인한다. 외부 이메일도 추가 코드 인증 없이 동의로 보내되 email_verified·authoritative 조건은 기존 Gmail 자동 연결에서 계속 필수다.
+- 이메일 누락은 `EMAIL_REQUIRED`, 부적합은 `INVALID_EMAIL`이다. 모바일은 HTTP 400 Problem Details와 `nextAction: AUTHENTICATE`, 웹 콜백은 고정 복귀 URI의 `oauthError`로만 전달한다. 실패 시 가입 증명·회원·서비스 세션을 새로 발급하지 않는다.
+- 기존 subject 로그인·재인증 명시 연결은 신규 이메일 검사와 분리한다. 같은 이메일만으로 다른 회원에 연결하지 않는다.
+- 신규 증명은 바로 `AGREEMENTS`이며 소셜 이메일 보완 API·`VERIFY_EMAIL`을 제거한 클라이언트와 함께 적용한다. 과거 이메일 없는 증명과 소셜 challenge의 거절·정리는 챕터 기반 전환 계약을 따른다.

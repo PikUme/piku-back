@@ -3,13 +3,13 @@
 - Status: 구현 계약, 배포·활성화 전
 - Audience: 프론트엔드·모바일 개발자
 - Source of Truth: Yes
-- Last Reviewed: 2026-09-19
+- Last Reviewed: 2026-09-21
 
 ## 범위와 공통 가입 흐름
 
-Google 인증 시작·완료와 기존 계정 연결을 제공한다. 신규 Google 신원은 챕터형 가입의 공통 `progress`로 이어진다. 이메일 보완이 필요하면 `VERIFY_EMAIL`, 필수 동의가 필요하면 `AGREEMENTS`, 이미 생성된 미완료 회원은 `PROFILE`, 완료 회원은 `COMPLETE`다. 실제 회원 생성은 필수 동의 후이며 인증 성공만으로 일반 서비스를 초기화하지 않는다.
+Google 인증 시작·완료와 기존 계정 연결을 제공한다. 신규 Google 신원은 챕터형 가입의 공통 `progress`로 이어진다. 유효한 제공자 이메일이 있는 신규 신원은 `AGREEMENTS`, 이미 생성된 미완료 회원은 `PROFILE`, 완료 회원은 `COMPLETE`다. 실제 회원 생성은 필수 동의 후이며 인증 성공만으로 일반 서비스를 초기화하지 않는다.
 
-가입 API 기준 경로는 웹 `/api/auth/signup`, 모바일 `/api/mobile/auth/signup`이다. 진행 조회 `/progress`, 이메일 보완 `/email/code`·`/social/email`, 동의 `/agreements`, 닉네임 `/nickname`, 완료 `/profile` 계약은 선행 챕터형 가입과 같다. Google 전용 신규 회원에는 비밀번호가 없으며 비밀번호 재설정으로 비밀번호를 추가하지 않는다.
+가입 API 기준 경로는 웹 `/api/auth/signup`, 모바일 `/api/mobile/auth/signup`이다. 진행 조회 `/progress`, 동의 `/agreements`, 닉네임 `/nickname`, 완료 `/profile` 계약은 선행 챕터형 가입과 같다. Google 전용 신규 회원에는 비밀번호가 없으며 비밀번호 재설정으로 비밀번호를 추가하지 않는다.
 
 ## Google 인증 API
 
@@ -32,17 +32,17 @@ Google 로그인 버튼에서는 POST `/api/auth/oauth/google/start`에 `link: f
 
 시작 본문은 `{"link": false}`이고 응답은 `{authorizationUrl: string, expiresAt: UTC 시각}`이다. state·nonce·PKCE는 서버가 생성하고 반환 URL에 필요한 값을 포함한다. 프론트가 URL을 재구성하거나 Google client secret을 취급하지 않는다. Google이 접근하는 백엔드 콜백 주소와 사용자가 최종 도착하는 프론트 복귀 주소는 서로 다르다.
 
-복귀 시 이전 액세스 토큰을 재사용하지 말고 서버의 새 결과를 확인한다. 기존 회원이면 `rn`으로 POST `/api/auth/reissue` 후 GET `/api/auth/signup/progress`를 조회한다. 신규 가입이면 갱신 쿠키가 비워지고 가입 증명 쿠키가 있으므로, 토큰 없는 GET `/progress`에서 이메일 보완 또는 동의를 이어간다. 재발급의 401만으로 가입 증명까지 삭제하지 않는다.
+복귀 시 이전 액세스 토큰을 재사용하지 말고 서버의 새 결과를 확인한다. 기존 회원이면 rn으로 POST /api/auth/reissue 후 GET /api/auth/signup/progress를 조회한다. 신규 가입이면 갱신 쿠키가 비워지고 가입 증명 쿠키가 있으므로 토큰 없는 GET /progress에서 AGREEMENTS로 동의를 이어간다. 재발급의 401만으로 가입 증명까지 삭제하지 않는다.
 
 프론트 복귀 화면은 다음 순서로 처리한다.
 
 1. `oauthError`가 있으면 인증 실패를 표시하고 성공 화면으로 이동하지 않는다. 오류 URL을 정리하고 새 인증 시작을 제공한다. 취소·실패 시 기존 쿠키가 남을 수 있으므로 기존 로그인 상태를 새 Google 인증 성공으로 해석하지 않는다.
 2. 오류가 없으면 이전 액세스 토큰을 요청에 붙이지 않고 POST `/api/auth/reissue`를 쿠키 포함으로 호출한다. 리다이렉트 응답의 `Authorization` 헤더를 화면 JavaScript에서 읽으려 하지 않는다.
 3. 재발급 200이면 응답 `Authorization: Bearer …`를 저장하고 그 토큰으로 GET `/api/auth/signup/progress`와 필요 시 GET `/api/auth/me`를 조회한다.
-4. 재발급 401이면 로그인 토큰 없이 GET `/api/auth/signup/progress`를 호출한다. `VERIFY_EMAIL`은 이메일 보완, `AGREEMENTS`는 동의, `AUTHENTICATE`는 인증 시작 화면으로 이동한다. 5xx나 네트워크 실패를 신규 가입으로 단정하지 말고 복구 재시도를 제공한다.
+4. 재발급 401이면 로그인 토큰 없이 GET /api/auth/signup/progress를 호출한다. AGREEMENTS는 동의, AUTHENTICATE는 인증 시작 화면으로 이동하며 VERIFY_EMAIL은 더 이상 반환하지 않는다. 5xx나 네트워크 실패를 신규 가입으로 단정하지 말고 복구 재시도를 제공한다.
 5. `PROFILE`이면 제한된 가입 프로필 화면, `COMPLETE`이면 일반 서비스로 이동한다. 인증된 진행 조회는 Bearer 회원 상태가 가입 증명보다 우선한다. 새 Google 가입을 복구할 때 과거 회원 토큰을 보내면 잘못된 회원 화면을 보게 될 수 있다.
 
-시작 API의 `expiresAt`는 10분짜리 Google 요청 만료 시각이다. 인증 후 발급되는 가입 증명의 만료 시각과 구분한다. 동의 제출까지의 증명은 10분 고정이며 재조회·이메일 보완으로 연장되지 않는다.
+시작 API의 expiresAt는 10분짜리 Google 요청 만료 시각이다. 인증 후 발급되는 가입 증명의 만료 시각과 구분한다. 동의 제출까지의 증명은 10분 고정이며 재조회로 연장되지 않는다.
 
 명시적 연결은 기존 계정 로그인 상태에서 `link: true`, 현재 비밀번호를 시작 요청에 함께 제출한다. 대상 회원은 Bearer 토큰으로 결정한다. 클라이언트가 targetUserId나 임의 복귀 주소를 보내지 않는다. 기존 회원 연결에는 새 약관 동의가 없다.
 
@@ -56,7 +56,7 @@ challenge 본문은 `{"registration": "<환경별 등록 이름>", "link": false
 
 서버는 ID 토큰의 nonce가 challenge 응답의 nonce와 일치하는지 확인한다. 기존 Google 로그인에서 얻은 토큰을 그대로 재사용할 수 있다고 가정하지 않는다. 앱이 사용하는 인증 방식으로 해당 nonce가 포함된 ID 토큰을 만들 수 있는지 실제 기기에서 확인해야 한다. 이 모바일 API는 JSON으로 완료되며 서버가 앱 deep link로 303 이동시키지 않는다. 앱으로 돌아오는 동작은 앱의 Google 인증 등록에 맞게 처리한다.
 
-모바일의 모든 가입 쓰기에는 `X-Signup-Binding`을 전달하고 소셜 이메일 코드 발송·이메일 보완·동의에는 `X-Signup-Proof`도 전달한다. 동의에는 `Device-Id`, 프로필 예약·완료·탈퇴에는 Bearer가 추가로 필요하다. 프로필 단계에서도 호출자 헤더를 생략하지 않는다.
+모바일의 모든 가입 쓰기에는 `X-Signup-Binding`을 전달하고 동의에는 `X-Signup-Proof`도 전달한다. 소셜 가입에서 이메일 코드 발송·보완 API를 호출하지 않는다. 동의에는 `Device-Id`, 프로필 예약·완료·탈퇴에는 Bearer가 추가로 필요하다. 프로필 단계에서도 호출자 헤더를 생략하지 않는다.
 
 회원이 결정된 응답은 `tokens`에 기존 모바일 형식인 `tokenType`, `accessToken`, `refreshToken`, `accessTokenExpiresIn`, `refreshTokenExpiresIn`을 담는다. 새 회원 인증 단계에서는 `tokens` 없이 `proof`와 `progress`를 받는다. 모바일 현재 회원 조회는 GET `/api/mobile/auth/me`다. 기존 로그인·재발급·로그아웃 API는 유지한다.
 
@@ -80,7 +80,7 @@ challenge 본문은 `{"registration": "<환경별 등록 이름>", "link": false
 - 백엔드가 기존 이메일 가입의 인증 출처를 확인하고 `signup.legacy-email-accounts-verified`를 활성화함. 기본값은 false
 - 해당 회원에 다른 Google subject가 이미 연결되어 있지 않음
 
-Workspace 주소를 포함한 다른 도메인의 동일 이메일은 이 자동 연결에 포함되지 않는다. 동일한 기존 이메일을 찾았으나 자동 연결 조건이 안 맞으면 `ACCOUNT_LINK_CONFLICT`로 기존 로그인을 안내한다. Google 이메일을 서비스 이메일로 바로 신뢰할 수 없으면 신규 가입 증명의 `VERIFY_EMAIL` 단계에서 서비스 이메일을 인증한다. 이것만으로 이미 존재하는 다른 계정에 자동 연결되지는 않는다.
+Workspace 주소를 포함한 다른 도메인의 동일 이메일은 이 자동 연결에 포함되지 않는다. 동일한 기존 이메일을 찾았으나 자동 연결의 email_verified·authoritative·Gmail·기존 이메일 가입 출처·비밀번호·이메일 일치·subject 충돌 방어 중 어느 조건이라도 안 맞으면 ACCOUNT_LINK_CONFLICT로 기존 로그인을 안내한다. 신규 가입에서 외부 이메일을 수용하는 것으로 자동 연결 조건을 완화하지 않는다.
 
 ### 로그인 후 명시적 연결
 
@@ -102,6 +102,7 @@ JSON API는 `application/problem+json`의 `status`, `detail`, `type`, `instance`
 | --- | --- | --- |
 | 400 | `OAUTH_INVALID_REQUEST`, `OAUTH_NOT_FOUND`, `OAUTH_BINDING_MISMATCH`, `OAUTH_CHANNEL_MISMATCH` | 같은 호출자·채널로 새 Google 인증 시작 |
 | 400 | `PROVIDER_NOT_SUPPORTED` | 지원 제공자 확인 |
+| 400 | `EMAIL_REQUIRED`, `INVALID_EMAIL` | 제공자가 유효 이메일을 제공하는 계정 또는 일반 이메일 가입으로 다시 시작. `nextAction: AUTHENTICATE`, 증명·회원 생성 없음 |
 | 401 | `GOOGLE_INVALID_IDENTITY` | 새 challenge·nonce로 재인증 |
 | 401 | `INVALID_CREDENTIALS`, `USER_UNAVAILABLE` | 기존 계정 로그인·재인증과 회원 상태 확인 |
 | 403 | `ORIGIN_FORBIDDEN`, `CSRF_INVALID` | Origin 설정·호출자 쿠키·CSRF 확인 |
@@ -113,6 +114,8 @@ JSON API는 `application/problem+json`의 `status`, `detail`, `type`, `instance`
 | 503 | `CONFIGURATION`, `OAUTH_CONFIGURATION`, `GOOGLE_CONFIGURATION` | 백엔드·Google 등록 설정 확인 |
 | 503 | `GOOGLE_UNAVAILABLE` | 일시 실패 안내 후 새 인증 시작 |
 | 503 | `SIGNUP_DISABLED` | 연결 없는 새 가입 중지 안내; 기존 subject 로그인과 구분 |
+
+웹 콜백에서 이메일 누락·부적합은 `oauthError=EMAIL_REQUIRED` 또는 `oauthError=INVALID_EMAIL`로 고정 복귀 주소에 돌아온다. 추가 이메일 입력이나 코드 인증 화면으로 보내지 않는다.
 
 완료 요청의 장애·응답 유실은 계정 연결 취소를 뜻하지 않는다. 이미 연결이 커밋됐을 수 있으므로 기존 state·ID 토큰을 반복 제출하거나 연결을 자동 해제하지 않는다. 새 인증에서 같은 Google 계정을 검증하면 기존 회원으로 복구된다.
 

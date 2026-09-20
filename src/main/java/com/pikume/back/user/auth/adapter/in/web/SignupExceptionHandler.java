@@ -35,7 +35,8 @@ public class SignupExceptionHandler {
             case PROOF_EXPIRED -> "가입 인증이 만료되었습니다. 다시 인증해주세요.";
             case AGREEMENTS_REQUIRED -> "필수 약관에 동의해주세요.";
             case AGREEMENT_VERSION_MISMATCH -> "최신 약관을 확인한 후 다시 동의해주세요.";
-            case EMAIL_REQUIRED -> "서비스에서 사용할 이메일을 인증해주세요.";
+            case EMAIL_REQUIRED -> "소셜 계정에서 이메일을 제공해야 가입할 수 있습니다.";
+            case INVALID_EMAIL -> "가입에 사용할 수 없는 이메일입니다.";
             case EMAIL_ALREADY_REGISTERED, ACCOUNT_LINK_CONFLICT -> "이미 등록된 계정입니다. 기존 로그인 방법을 이용해주세요.";
             case CODE_MISMATCH -> "인증 코드가 일치하지 않습니다.";
             case CODE_EXPIRED -> "인증 코드가 만료되었습니다.";
@@ -106,7 +107,8 @@ public class SignupExceptionHandler {
         ProblemDetail problem = problems.create(descriptor,detail,request.getRequestURI());
         problem.setProperty("code",code);
         if ("PROFILE_SETUP_REQUIRED".equals(code)) problem.setProperty("nextAction","PROFILE");
-        if ("PROOF_EXPIRED".equals(code) || "LEGACY_SIGNUP_DISABLED".equals(code)) problem.setProperty("nextAction","AUTHENTICATE");
+        if ("PROOF_EXPIRED".equals(code) || "LEGACY_SIGNUP_DISABLED".equals(code)
+            || "EMAIL_REQUIRED".equals(code) || "INVALID_EMAIL".equals(code)) problem.setProperty("nextAction","AUTHENTICATE");
         return ResponseEntity.status(status).contentType(MediaType.APPLICATION_PROBLEM_JSON).cacheControl(CacheControl.noStore()).body(problem);
     }
     private record SignupProblem(URI type, HttpStatus status, String title) implements ApiProblemType {}

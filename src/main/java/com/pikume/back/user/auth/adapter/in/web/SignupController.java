@@ -41,8 +41,6 @@ public class SignupController {
         boolean restartAuthentication) {}
     public record EmailAuthenticationRequest(@NotBlank String challengeId, @NotBlank @Email String email,
         @Pattern(regexp="[0-9]{6}") @NotNull String code, @NotBlank @Size(max=72) String password) {}
-    public record SocialEmailRequest(@NotBlank String challengeId, @NotBlank @Email String email,
-        @Pattern(regexp="[0-9]{6}") @NotNull String code) {}
     public record AgreementsRequest(@NotEmpty @Size(max=20) List<@NotNull AgreementAcceptance> agreements) {}
     public record NicknameRequest(@io.swagger.v3.oas.annotations.media.Schema(requiredMode=io.swagger.v3.oas.annotations.media.Schema.RequiredMode.REQUIRED, description="앞뒤 공백 정리 후 1~20자의 닉네임") String nickname) {}
     public record ProfileRequest(@io.swagger.v3.oas.annotations.media.Schema(requiredMode=io.swagger.v3.oas.annotations.media.Schema.RequiredMode.REQUIRED, description="현재 본인 닉네임 또는 예약한 닉네임. 앞뒤 공백 정리 후 1~20자") String nickname, @NotNull @Positive Long characterId) {}
@@ -97,7 +95,7 @@ public class SignupController {
     public EmailSignupChallengeResult sendCode(@Valid @RequestBody EmailCodeRequest body, HttpServletRequest request, HttpServletResponse response) {
         response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
         var result = signup.sendEmailCode(new EmailSignupChallengeCommand(body.email(), bindingForWrite(request), request.getRemoteAddr(),
-            body.restartAuthentication() ? null : body.challengeId(), body.restartAuthentication() ? null : credentials.proof(request)));
+            body.restartAuthentication() ? null : body.challengeId()));
         if (body.restartAuthentication() && !SignupWebCredentials.mobile(request)) credentials.clearProof(response);
         return result;
     }
@@ -106,14 +104,6 @@ public class SignupController {
     public SignupSessionResponseWriter.StepResponse authenticateEmail(@Valid @RequestBody EmailAuthenticationRequest body,
         HttpServletRequest request, HttpServletResponse response) {
         var result = signup.authenticateEmail(new EmailSignupAuthenticationCommand(body.challengeId(), body.email(), body.code(), body.password(), bindingForWrite(request)));
-        return sessions.write(result, null, SignupWebCredentials.mobile(request), response);
-    }
-
-    @PostMapping("/social/email")
-    public SignupSessionResponseWriter.StepResponse verifySocialEmail(@Valid @RequestBody SocialEmailRequest body,
-        HttpServletRequest request, HttpServletResponse response) {
-        String binding = bindingForWrite(request);
-        var result = signup.verifySocialEmail(new SocialSignupEmailCommand(credentials.requireProof(request), body.challengeId(), body.email(), body.code(), binding));
         return sessions.write(result, null, SignupWebCredentials.mobile(request), response);
     }
 

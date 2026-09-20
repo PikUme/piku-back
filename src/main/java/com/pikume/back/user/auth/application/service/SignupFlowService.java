@@ -12,7 +12,6 @@ import com.pikume.back.user.auth.application.dto.SignupNextAction;
 import com.pikume.back.user.auth.application.dto.SignupProgress;
 import com.pikume.back.user.auth.application.dto.SignupProofResult;
 import com.pikume.back.user.auth.application.dto.SocialSignupAuthenticationCommand;
-import com.pikume.back.user.auth.application.dto.SocialSignupEmailCommand;
 import com.pikume.back.user.auth.application.exception.SignupFailure;
 import com.pikume.back.user.auth.application.exception.SignupFlowException;
 import com.pikume.back.user.auth.application.port.in.CleanupSignupUseCase;
@@ -106,26 +105,19 @@ public class SignupFlowService implements SignupFlowUseCase, QuerySignupAgreemen
         String email = validSignupEmail(command.email());
         String caller = requiredHash(command.callerBinding());
         String origin = requiredHash(command.requestOriginKey());
-        String proofHash = command.signupProof() == null ? null : requiredHash(command.signupProof());
         var reservation = tx(() -> {
-            SignupAuthentication proof = null;
-            if (proofHash != null) {
-                proof = loadProof(command.signupProof(), command.callerBinding());
-                requireSocialUnconsumed(proof);
-            }
             Verification challenge = null;
             if (command.challengeId() != null) {
                 challenge = store.lockChallenge(command.challengeId()).orElseThrow(() -> fail(CHALLENGE_INVALID));
-                if (!challenge.isBoundTo(email, caller, proofHash) || challenge.getConsumedAt() != null) throw fail(CHALLENGE_INVALID);
+                if (!challenge.isBoundTo(email, caller) || challenge.getConsumedAt() != null) throw fail(CHALLENGE_INVALID);
             }
-            // The proof, challenge and rate guard are now locked. Rejection below rolls back the reservation too.
+            // Rejection after the challenge/rate guard locks rolls back the reservation too.
             Instant now = store.reserveEmailSend(hash(email.toLowerCase(Locale.ROOT)), origin, policy.emailHourlyLimit(), policy.originHourlyLimit(), policy.resendSeconds());
-            if (proof != null) proof.beginEmailVerification(email, now);
             if (challenge != null) {
                 if (now.isBefore(challenge.getResendAvailableAt())) throw fail(RATE_LIMITED);
                 challenge.restartSignup(now, policy.resendSeconds());
             } else {
-                challenge = Verification.signupChallenge(UUID.randomUUID().toString(), email, caller, proofHash, now, policy.resendSeconds());
+                challenge = Verification.signupChallenge(UUID.randomUUID().toString(), email, caller, now, policy.resendSeconds());
             }
             store.saveChallenge(challenge);
             return new ChallengeReservation(challenge.getChallengeId(), challenge.getSentAt());
@@ -160,30 +152,13 @@ public class SignupFlowService implements SignupFlowUseCase, QuerySignupAgreemen
         Attempt result = tx(() -> {
             Verification challenge = store.lockChallenge(command.challengeId()).orElseThrow(() -> fail(CHALLENGE_INVALID));
             Instant now = Instant.now();
-            String invalid = challenge.validateSignup(command.email(), hash(command.callerBinding()), null, command.code(), now, policy.maxCodeAttempts());
+            String invalid = challenge.validateSignup(command.email(), hash(command.callerBinding()), command.code(), now, policy.maxCodeAttempts());
             if (invalid != null) return new Attempt(SignupFailure.valueOf(invalid), null);
             String protectedPassword = passwords.protect(command.password());
             String raw = token();
             SignupAuthentication proof = SignupAuthentication.email(hash(raw), hash(command.callerBinding()), command.email(), protectedPassword, now);
             store.saveProof(proof); challenge.consumeSignup(now);
             return new Attempt(null, new SignupProofResult(raw, proofProgress(proof)));
-        });
-        return completedAttempt(result);
-    }
-
-    @Override
-    public SignupProofResult verifySocialEmail(SocialSignupEmailCommand command) {
-        requireEnabled();
-        validSignupEmail(command.email());
-        Attempt result = tx(() -> {
-            SignupAuthentication proof = loadProof(command.proof(), command.callerBinding());
-            requireSocialUnconsumed(proof);
-            Verification challenge = store.lockChallenge(command.challengeId()).orElseThrow(() -> fail(CHALLENGE_INVALID));
-            Instant now = Instant.now();
-            String invalid = challenge.validateSignup(command.email(), hash(command.callerBinding()), hash(command.proof()), command.code(), now, policy.maxCodeAttempts());
-            if (invalid != null) return new Attempt(SignupFailure.valueOf(invalid), null);
-            proof.verifyEmail(command.email(), now); challenge.consumeSignup(now);
-            return new Attempt(null, new SignupProofResult(command.proof(), proofProgress(proof)));
         });
         return completedAttempt(result);
     }
@@ -218,18 +193,19 @@ public class SignupFlowService implements SignupFlowUseCase, QuerySignupAgreemen
             link(target.getId(), c.provider(), c.subject(), Instant.now());
             return existingResult(target);
         }
-        String email = c.email()!=null && c.emailVerified() && c.emailAuthoritative() ? validSignupEmail(c.email()) : null;
-        if (email != null) {
-            var user=store.findUserByEmail(email);
-            if (user.isPresent()) {
-                User existing=user.get();
-                if (existing.isWithdrawn()) throw fail(USER_UNAVAILABLE);
-                if (!email.toLowerCase(Locale.ROOT).endsWith("@gmail.com") || !email.equalsIgnoreCase(existing.getEmail())
+        if (c.email() == null || c.email().isBlank()) throw fail(EMAIL_REQUIRED);
+        String email = validSignupEmail(c.email());
+        var user=store.findUserByEmail(email);
+        if (user.isPresent()) {
+            User existing=user.get();
+            if (existing.isWithdrawn()) throw fail(USER_UNAVAILABLE);
+            // Accepting a provider email for signup does not authorize linking an existing account.
+            if (!c.emailVerified() || !c.emailAuthoritative()
+                || !email.toLowerCase(Locale.ROOT).endsWith("@gmail.com") || !email.equalsIgnoreCase(existing.getEmail())
                 || existing.getPassword()==null || existing.getPassword().isBlank() || !policy.legacyEmailAccountsVerified())
                 throw fail(ACCOUNT_LINK_CONFLICT);
-                link(existing.getId(), c.provider(), c.subject(), Instant.now());
-                return existingResult(existing);
-            }
+            link(existing.getId(), c.provider(), c.subject(), Instant.now());
+            return existingResult(existing);
         }
         String raw=token();
         SignupAuthentication proof=SignupAuthentication.social(hash(raw), hash(c.callerBinding()), c.provider(), c.subject(), email, Instant.now());
@@ -379,14 +355,10 @@ public class SignupFlowService implements SignupFlowUseCase, QuerySignupAgreemen
         return proof;
     }
 
-    private void requireSocialUnconsumed(SignupAuthentication p) {
-        if (!"CHAPTERED".equals(p.getFlowType()) || !"SOCIAL".equals(p.getMethod())) throw fail(FLOW_MISMATCH);
-        if (p.getConsumedAt()!=null) throw fail(PROOF_ALREADY_USED);
-    }
-
     private SignupProgress proofProgress(SignupAuthentication p) {
         if (p.getResultUserId()!=null) return userProgress(activeUser(p.getResultUserId()), p.getExpiresAt());
-        return new SignupProgress(p.getVerifiedEmail()==null?SignupNextAction.VERIFY_EMAIL:SignupNextAction.AGREEMENTS, p.getVerifiedEmail(), null, null, p.getExpiresAt());
+        if (p.getVerifiedEmail() == null || p.getVerifiedEmail().isBlank()) throw fail(PROOF_INVALID);
+        return new SignupProgress(SignupNextAction.AGREEMENTS, p.getVerifiedEmail(), null, null, p.getExpiresAt());
     }
 
     private User activeUser(String id) {
@@ -394,6 +366,8 @@ public class SignupFlowService implements SignupFlowUseCase, QuerySignupAgreemen
         if (user.isWithdrawn()) throw fail(USER_UNAVAILABLE);
         return user;
     }
+
+
 
     private SignupProofResult existingResult(User u) {
         return new SignupProofResult(null, userProgress(u, null));
@@ -405,6 +379,7 @@ public class SignupFlowService implements SignupFlowUseCase, QuerySignupAgreemen
 
     private String validSignupEmail(String email) {
         try {
+            if (email == null || email.length() > 255) throw new IllegalArgumentException();
             new Email(email);
         } catch (RuntimeException error) {
             throw fail(INVALID_EMAIL);
@@ -432,7 +407,7 @@ public class SignupFlowService implements SignupFlowUseCase, QuerySignupAgreemen
         } catch (SignupProofException e) {
             throw fail(switch (e.getReason()) {
                 case INVALID -> PROOF_INVALID;case EXPIRED -> PROOF_EXPIRED;case ALREADY_USED -> PROOF_ALREADY_USED;
-                case EMAIL_REQUIRED -> EMAIL_REQUIRED;case FLOW_MISMATCH -> FLOW_MISMATCH;
+                case FLOW_MISMATCH -> FLOW_MISMATCH;
             });
         }
     }

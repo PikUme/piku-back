@@ -3,7 +3,7 @@
 - Status: 활성화 전 운영 기준
 - Audience: 백엔드·운영 담당자
 - Source of Truth: Yes
-- Last Reviewed: 2026-09-19
+- Last Reviewed: 2026-09-21
 
 ## 배포와 활성화 구분
 
@@ -57,3 +57,11 @@
 일반 Gradle 테스트와 실제 MySQL migration 태그 테스트를 구분한다. H2만으로 MySQL 닉네임 collation, 고유 제약과 마이그레이션을 입증하지 않는다. 공통 소셜 증명 테스트는 검증된 신원을 fixture로 제공하며 외부 제공자 로그인을 뜻하지 않는다.
 
 활성화 전 실제 메일 전달, 갱신 세션 저장, 웹·API 도메인의 HTTPS 쿠키·Origin·CORS, 약관 본문·버전, 캐릭터 ID·자산, 적용 스키마·격리·binary log 조건을 별도로 확인한다. 이 변경에는 외부 로그인 진입점이 없으며 외부 인증은 후속 변경과 별도 활성화로 제공한다.
+
+## 소셜 이메일 보완 제거 전환
+
+- 적용된 V17과 기존 회원·소셜 연결·동의 데이터는 수정하지 않는다. `verified_email`의 DB nullable 속성과 `verification.signup_proof_hash` 컬럼은 호환을 위해 남긴다.
+- 새 SOCIAL 증명은 제공자 이메일이 필수다. 이메일 없는 과거 SOCIAL 증명은 직접 소비에서 `PROOF_INVALID`, 진행 조회에서 `AUTHENTICATE`로 돌아가며 만료 정리 대상으로 남긴다.
+- 새 일반 이메일 challenge에는 소셜 proof를 저장하지 않는다. 과거 `signup_proof_hash`가 있는 challenge의 재발송·일반 이메일 인증은 `CHALLENGE_INVALID`로 거절한다.
+- 웹·모바일의 `/signup/social/email` 매핑을 제거하고 `VERIFY_EMAIL`을 더 이상 반환하지 않는다. 클라이언트의 화면·라우팅·호출도 함께 제거한 뒤 활성화한다. 새 OAuth 가입 오류 `EMAIL_REQUIRED`·`INVALID_EMAIL`은 인증 시작으로 복구한다.
+- 일반 이메일 인증·재발송 제한, 이전 증명·challenge 재사용 거절, 동의 원자성·기존 회원 재진입을 검증한다. 제공자 이메일 수용 확대로 기존 계정 자동 연결 보호 조건을 완화하지 않는다.

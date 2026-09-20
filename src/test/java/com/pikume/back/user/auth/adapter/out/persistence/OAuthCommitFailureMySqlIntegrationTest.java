@@ -138,6 +138,51 @@ class OAuthCommitFailureMySqlIntegrationTest extends SignupPersistenceTestSuppor
         assertThat(count("User")).isEqualTo(1);assertThat(count("UserOAuthAccount")).isEqualTo(1);
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans={false,true})
+    void externalProviderEmailCreatesConsentProofWithoutAnEmailChallenge(boolean mobile) {
+        identity.set(new GoogleIdentity("NewSubject","member@naver.com",false,false));
+
+        var signup=complete(mobile,start(mobile)).signup();
+
+        assertThat(signup.progress().nextAction()).isEqualTo(SignupNextAction.AGREEMENTS);
+        assertThat(signup.progress().email()).isEqualTo("member@naver.com");
+        assertThat(count("SignupAuthentication")).isEqualTo(1);
+        assertThat(count("Verification")).isZero();
+        assertThat(count("User")).isEqualTo(1);
+        assertThat(count("UserOAuthAccount")).isZero();
+        assertThat(jdbc.queryForObject("SELECT status FROM oauth_authorization_requests",String.class)).isEqualTo("CONSUMED");
+
+        var member=service.agree(new SignupAgreementCommand(signup.proof(),"caller",agreements));
+
+        assertThat(member.progress().nextAction()).isEqualTo(SignupNextAction.PROFILE);
+        assertThat(count("User")).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT user_id FROM user_oauth_accounts WHERE provider_subject='NewSubject'",String.class))
+            .isEqualTo(member.progress().userId());
+        verifyNoInteractions(sender,passwords);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,MISSING,EMAIL_REQUIRED","true,MISSING,EMAIL_REQUIRED","false,INVALID,INVALID_EMAIL","true,BLOCKED,INVALID_EMAIL"})
+    void rejectedProviderEmailLeavesNoSignupArtifactsAndFailsOAuthRequest(boolean mobile,String emailCase,String expected) {
+        String email=switch(emailCase) {case "MISSING"->null;case "INVALID"->"invalid";default->"member@blocked.example";};
+        identity.set(new GoogleIdentity("NewSubject",email,false,false));
+        given(allowed.isEmailAllowed("member@blocked.example")).willReturn(false);
+        String state=start(mobile);
+
+        assertThatThrownBy(()->complete(mobile,state))
+            .isInstanceOf(com.pikume.back.user.auth.application.exception.SignupFlowException.class)
+            .extracting("reason").isEqualTo(com.pikume.back.user.auth.application.exception.SignupFailure.valueOf(expected));
+
+        assertThat(count("SignupAuthentication")).isZero();
+        assertThat(count("Verification")).isZero();
+        assertThat(count("UserOAuthAccount")).isZero();
+        assertThat(count("UserAgreement")).isZero();
+        assertThat(count("User")).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT status FROM oauth_authorization_requests",String.class)).isEqualTo("FAILED");
+        verifyNoInteractions(sender,passwords);
+    }
+
     private String start(boolean mobile) {
         if(!mobile)return google.startWeb("caller","device",null,null,"origin").authorizationUrl();
         var challenge=google.startMobile("ios","caller","device",null,null,"origin");

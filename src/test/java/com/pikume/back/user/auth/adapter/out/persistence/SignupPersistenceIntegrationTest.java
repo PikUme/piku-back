@@ -74,7 +74,7 @@ class SignupPersistenceIntegrationTest extends SignupPersistenceTestSupport {
  }
 
  @Test void failedCodeAttemptsCommitDespitePublicExceptionAndCorrectCodeThenCannotBypassLimit() {
-  var c=service.sendEmailCode(new EmailSignupChallengeCommand("a@gmail.com","caller","origin",null,null));
+  var c=service.sendEmailCode(new EmailSignupChallengeCommand("a@gmail.com","caller","origin",null));
   for(int i=0;i<2;i++)assertThatThrownBy(() -> service.authenticateEmail(new EmailSignupAuthenticationCommand(c.challengeId(),"a@gmail.com","000000","Password!","caller")))
     .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.CODE_MISMATCH);
   assertThat((Integer) tx.required(() -> store.lockChallenge(c.challengeId()).orElseThrow().getAttempts())).isEqualTo(2);
@@ -84,7 +84,7 @@ class SignupPersistenceIntegrationTest extends SignupPersistenceTestSupport {
   verify(passwords,never()).protect(anyString());
  }
  @Test void verificationConsumptionAndProofCreationAreAtomicAndCallerBound() {
-  var c=service.sendEmailCode(new EmailSignupChallengeCommand("a@gmail.com","caller","origin",null,null));
+  var c=service.sendEmailCode(new EmailSignupChallengeCommand("a@gmail.com","caller","origin",null));
   assertThatThrownBy(() -> service.authenticateEmail(new EmailSignupAuthenticationCommand(c.challengeId(),"a@gmail.com","123456","Password!","other"))).isInstanceOf(SignupFlowException.class);
   var proof=service.authenticateEmail(new EmailSignupAuthenticationCommand(c.challengeId(),"a@gmail.com","123456","Password!","caller"));
   assertThat(proof.progress().nextAction()).isEqualTo(SignupNextAction.AGREEMENTS);
@@ -92,14 +92,14 @@ class SignupPersistenceIntegrationTest extends SignupPersistenceTestSupport {
   assertThatThrownBy(() -> service.authenticateEmail(new EmailSignupAuthenticationCommand(c.challengeId(),"a@gmail.com","123456","Password!","caller"))).isInstanceOf(SignupFlowException.class);
  }
  @Test void changingChallengeIdentifierOrOriginCannotBypassEmailResendCooldown() {
-  service.sendEmailCode(new EmailSignupChallengeCommand("a@gmail.com","caller","origin",null,null));
-  assertThatThrownBy(() -> service.sendEmailCode(new EmailSignupChallengeCommand("A@gmail.com","caller","other-origin",null,null)))
+  service.sendEmailCode(new EmailSignupChallengeCommand("a@gmail.com","caller","origin",null));
+  assertThatThrownBy(() -> service.sendEmailCode(new EmailSignupChallengeCommand("A@gmail.com","caller","other-origin",null)))
     .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.RATE_LIMITED);
   verify(sender,times(1)).issueVerificationEmail(anyString());
  }
  @Test void failedMailLeavesReservedRateButUnusableChallenge() {
   when(sender.issueVerificationEmail(anyString())).thenThrow(new IllegalStateException("delivery failed"));
-  assertThatThrownBy(() -> service.sendEmailCode(new EmailSignupChallengeCommand("a@gmail.com","caller","origin",null,null)))
+  assertThatThrownBy(() -> service.sendEmailCode(new EmailSignupChallengeCommand("a@gmail.com","caller","origin",null)))
     .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.EMAIL_SEND_FAILED);
   assertThat(count("Verification")).isEqualTo(1);
   assertThat((Instant) tx.required(() -> em.createQuery("select v from Verification v",Verification.class).getSingleResult().getDeliveryCompletedAt())).isNull();
@@ -147,7 +147,7 @@ class SignupPersistenceIntegrationTest extends SignupPersistenceTestSupport {
  @Test void cleanupPurgesExpiredProofAndChallengeButPreservesAbandonedUser() {
   tx.required(() -> {
    store.saveProof(SignupAuthentication.email(SignupFlowService.hash("expired"),SignupFlowService.hash("caller"),"a@gmail.com","hash",Instant.now().minusSeconds(601)));
-   store.saveChallenge(Verification.signupChallenge("expired-challenge","a@gmail.com","caller",null,Instant.now().minusSeconds(301),60));
+   store.saveChallenge(Verification.signupChallenge("expired-challenge","a@gmail.com","caller",Instant.now().minusSeconds(301),60));
    store.createUser(User.pending("pending@gmail.com",null,"가입대기_keep",5L));return null;
   });
   service.purgeExpiredSignupArtifacts();
@@ -178,7 +178,7 @@ class SignupPersistenceIntegrationTest extends SignupPersistenceTestSupport {
    bucket.increment(now);em.persist(bucket);return null;
   });
   service.purgeExpiredSignupArtifacts();
-  assertThatThrownBy(() -> service.sendEmailCode(new EmailSignupChallengeCommand("a@gmail.com","caller","origin",null,null)))
+  assertThatThrownBy(() -> service.sendEmailCode(new EmailSignupChallengeCommand("a@gmail.com","caller","origin",null)))
     .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.RATE_LIMITED);
  }
 }

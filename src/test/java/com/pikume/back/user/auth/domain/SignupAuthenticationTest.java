@@ -44,16 +44,29 @@ class SignupAuthenticationTest {
                 .isInstanceOf(SignupProofException.class);
     }
 
-    @Test
-    void socialIdentityWithoutTrustedEmailMustCompleteEmailVerification() {
-        var proof = SignupAuthentication.social("token-hash", "caller-hash", "GOOGLE", "CaseSensitiveSubject", null, NOW);
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.NullAndEmptySource
+    @org.junit.jupiter.params.provider.ValueSource(strings = {" ", "invalid"})
+    void socialProofCannotBeCreatedWithoutAUsableProviderEmail(String email) {
+        assertThatThrownBy(() -> SignupAuthentication.social("token-hash", "caller-hash", "GOOGLE", "Subject", email, NOW))
+                .isInstanceOf(RuntimeException.class);
+    }
 
-        assertThatThrownBy(proof::requireConsentReady).isInstanceOf(SignupProofException.class);
-        proof.verifyEmail("member+tag@gmail.com", NOW.plusSeconds(30));
+    @Test
+    void socialEmailCannotExceedThePersistedEmailLimit() {
+        assertThatThrownBy(() -> SignupAuthentication.social("token-hash", "caller-hash", "GOOGLE", "Subject", "a".repeat(246)+"@gmail.com", NOW))
+                .isInstanceOf(SignupProofException.class);
+    }
+
+    @Test
+    void validProviderEmailIsReadyForConsentWithoutAServiceCode() {
+        var proof = SignupAuthentication.social("token-hash", "caller-hash", "GOOGLE", "CaseSensitiveSubject", "member@naver.com", NOW);
+
         proof.requireConsentReady();
 
+        assertThat(proof.getVerifiedEmail()).isEqualTo("member@naver.com");
+        assertThat(proof.getEmailVerificationSource()).isEqualTo("PROVIDER");
         assertThat(proof.getProviderSubject()).isEqualTo("CaseSensitiveSubject");
-        assertThat(proof.getVerifiedEmail()).isEqualTo("member+tag@gmail.com");
         assertThat(proof.getExpiresAt()).isEqualTo(NOW.plusSeconds(600));
         assertThat(proof.getPasswordHash()).isNull();
     }

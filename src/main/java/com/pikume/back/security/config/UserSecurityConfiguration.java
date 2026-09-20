@@ -57,7 +57,7 @@ public class UserSecurityConfiguration {
 				"/api/characters/fixed",
 				"/api/search"));
 		for (String base : List.of("/api/auth", "/api/mobile/auth")) {
-			for (String action : List.of("progress", "agreements", "email/code", "email", "social/email")) {
+			for (String action : List.of("progress", "agreements", "email/code", "email")) {
 				permittedPaths.add(base + "/signup/" + action);
 			}
 		}

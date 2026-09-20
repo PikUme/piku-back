@@ -42,6 +42,7 @@ public class Verification {
     private String challengeId;
     @Column(length = 64)
     private String callerHash;
+    // Retained for applied-schema compatibility; old social challenges cannot be reused.
     @Column(length = 64)
     private String signupProofHash;
     private Integer attempts;
@@ -51,21 +52,20 @@ public class Verification {
     private Instant deliveryCompletedAt;
 
     public static Verification signupChallenge(String id, String email, String callerHash,
-            String proofHash, Instant now, int resendSeconds) {
+            Instant now, int resendSeconds) {
         Verification challenge = new Verification(email, "PENDING", VerificationType.SIGN_UP,
                 LocalDateTime.ofInstant(now.plusSeconds(300), ZoneOffset.UTC));
         challenge.challengeId = id;
         challenge.callerHash = callerHash;
-        challenge.signupProofHash = proofHash;
         challenge.attempts = 0;
         challenge.sentAt = now;
         challenge.resendAvailableAt = now.plusSeconds(resendSeconds);
         return challenge;
     }
 
-    public boolean isBoundTo(String email, String callerHash, String proofHash) {
+    public boolean isBoundTo(String email, String callerHash) {
         return Objects.equals(this.email, email) && Objects.equals(this.callerHash, callerHash)
-                && Objects.equals(this.signupProofHash, proofHash) && type == VerificationType.SIGN_UP;
+                && signupProofHash == null && type == VerificationType.SIGN_UP;
     }
 
     public void restartSignup(Instant now, int resendSeconds) {
@@ -83,9 +83,9 @@ public class Verification {
     }
 
     /** Returns failure without throwing so a failed attempt can be committed. */
-    public String validateSignup(String email, String callerHash, String proofHash, String submittedCode,
+    public String validateSignup(String email, String callerHash, String submittedCode,
             Instant now, int maxAttempts) {
-        if (challengeId == null || !isBoundTo(email, callerHash, proofHash) || consumedAt != null
+        if (challengeId == null || !isBoundTo(email, callerHash) || consumedAt != null
                 || deliveryCompletedAt == null) return "CHALLENGE_INVALID";
         if (!now.isBefore(expiresAt.toInstant(ZoneOffset.UTC))) return "CODE_EXPIRED";
         if (attempts >= maxAttempts) return "ATTEMPTS_EXHAUSTED";
