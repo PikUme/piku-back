@@ -3,7 +3,7 @@
 - Status: 구현 계약, 배포·활성화 전
 - Audience: 프론트엔드·모바일 개발자
 - Source of Truth: Yes
-- Last Reviewed: 2026-09-12
+- Last Reviewed: 2026-09-19
 
 ## 클라이언트가 바꿀 흐름
 

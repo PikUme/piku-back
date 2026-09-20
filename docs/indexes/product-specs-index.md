@@ -3,7 +3,7 @@
 - Status: Active
 - Audience: Engineers
 - Source of Truth: Yes
-- Last Reviewed: 2026-09-07
+- Last Reviewed: 2026-09-19
 
 ## 목적
 

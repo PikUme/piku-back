@@ -3,7 +3,7 @@
 - Status: 구현 계약, 기본 비활성화
 - Audience: 백엔드 개발자
 - Source of Truth: Yes
-- Last Reviewed: 2026-09-12
+- Last Reviewed: 2026-09-19
 
 ## 가입과 기존 계정
 
