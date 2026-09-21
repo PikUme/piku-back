@@ -194,7 +194,7 @@ public class DiaryCreationService implements CreateDiaryUseCase {
 					try {
 						relocateDiaryPhotoPort.delete(key);
 					} catch (RuntimeException exception) {
-						log.error("event={} objectKey={} reason={}", event, key, exception.getMessage(), exception);
+						log.error("event={} outcome=failed exception={}", event, exception.getClass().getSimpleName());
 					}
 				});
 	}
@@ -210,18 +210,16 @@ public class DiaryCreationService implements CreateDiaryUseCase {
 			transactionCompletionPort.runAfterCommit(
 					() -> notifyFriends(diary),
 					exception -> log.warn(
-							"event=diary_friend_notification_failed diaryId={} reason={}",
+							"event=diary_friend_notification_failed outcome=failed resourceId={} exception={}",
 							diary.getId(),
-							exception.getMessage(),
-							exception));
+							exception.getClass().getSimpleName()));
 		}
 		transactionCompletionPort.runAfterCommit(
 				() -> analysisPort.analyze(diary.getId(), diary.getContent()),
 				exception -> log.warn(
-						"event=diary_content_analysis_failed diaryId={} reason={}",
+						"event=diary_content_analysis_failed outcome=failed resourceId={} exception={}",
 						diary.getId(),
-						exception.getMessage(),
-						exception));
+						exception.getClass().getSimpleName()));
 	}
 
 	private void notifyFriends(Diary diary) {

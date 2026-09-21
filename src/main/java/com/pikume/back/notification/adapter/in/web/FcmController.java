@@ -3,7 +3,6 @@ package com.pikume.back.notification.adapter.in.web;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -15,7 +14,6 @@ import com.pikume.back.notification.application.port.in.RegisterPushTokenUseCase
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/fcm")
-@Slf4j
 @Tag(name = "Fcm", description = "Fcm 관리 API")
 public class FcmController {
 
@@ -24,7 +22,6 @@ public class FcmController {
 	@Operation(summary = "FCM 토큰 저장", description = "FCM 토큰과 디바이스 ID를 저장합니다.")
 	@PostMapping
 	public ResponseEntity<Void> saveToken(@RequestBody FcmTokenRequest request) {
-		log.info("토큰 저장 시도");
 		registerPushTokenUseCase.registerPushToken(
 				request.getUserId(),
 				request.getToken(),

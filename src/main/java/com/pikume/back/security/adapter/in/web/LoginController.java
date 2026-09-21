@@ -67,11 +67,9 @@ public class LoginController {
 	@PostMapping("/login")
 	public ResponseEntity<?> login(@RequestBody LoginRequest dto, HttpServletRequest request) {
 		String deviceId = request.getHeader(AuthWebConstants.DEVICE_ID_HEADER);
-		log.info("event=login_request_received outcome=accepted");
 
 		try {
 			LoginResult loginResult = loginUseCase.login(new LoginCommand(dto.getEmail(), dto.getPassword(), deviceId));
-			log.info("event=login_response_ready outcome=success userId={}", loginResult.userInfo().id());
 
 			ResponseCookie responseCookie = newRefreshCookie(loginResult.refreshToken());
 

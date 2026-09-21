@@ -60,7 +60,7 @@ public class FeedController {
 	@GetMapping("/{diaryId}")
 	public ResponseEntity<FeedDiaryResponse> getDiaryWithPhotos(@PathVariable Long diaryId,
 			@AuthenticationPrincipal UserPrincipal userPrincipal) {
-		log.info("Diary 조회 요청 - diaryId: {}", diaryId);
+		log.debug("event=feed_detail_requested resourceId={}", diaryId);
 
 		String viewerId = userPrincipal != null ? userPrincipal.getId() : null;
 		FeedDiaryResult result = queryFeedDetailUseCase.queryDetail(diaryId, viewerId);

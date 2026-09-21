@@ -42,7 +42,7 @@ public class FcmTokenPersistenceAdapter implements
 					existing -> existing.updateToken(token),
 					() -> fcmTokenJpaRepository.save(new FcmToken(userId, token, deviceId)));
 		} catch (IncorrectResultSizeDataAccessException | NonUniqueResultException e) {
-			log.error("event=fcm_token_duplicate_detected userId={}", userId);
+			log.error("event=fcm_token_duplicate_detected outcome=failed userId={}", userId);
 		}
 	}
 
@@ -57,6 +57,6 @@ public class FcmTokenPersistenceAdapter implements
 	@Transactional
 	public void revokePushTokenForDevice(String userId, String deviceId) {
 		fcmTokenJpaRepository.deleteByUserIdAndDeviceId(userId, deviceId);
-		log.info("event=fcm_device_token_deleted userId={}", userId);
+		log.info("event=fcm_device_token_deleted outcome=success userId={}", userId);
 	}
 }

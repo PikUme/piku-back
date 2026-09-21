@@ -1,5 +1,11 @@
 package com.pikume.back.diary.adapter.in.web;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import org.slf4j.LoggerFactory;
+import com.pikume.back.diary.application.exception.DiaryImageRelocationException;
 import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -20,6 +26,7 @@ import com.pikume.back.global.exception.GlobalExceptionHandler;
 
 import java.time.LocalDate;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -99,8 +106,40 @@ class DiaryExceptionHandlerTest {
 				.andExpect(jsonPath("$.detail").value("엔티티를 찾을 수 없습니다."));
 	}
 
+	@Test
+	@DisplayName("일기 서버 오류는 경계에서 한 번 기록하고 예외 메시지는 노출하지 않는다")
+	void logsServerFailureOnceWithoutExceptionMessage() throws Exception {
+		Logger logger = (Logger) LoggerFactory.getLogger(DiaryExceptionHandler.class);
+		ListAppender<ILoggingEvent> appender = new ListAppender<>();
+		appender.start();
+		logger.addAppender(appender);
+
+		try {
+			mockMvc.perform(get("/test/diary/not-found")).andExpect(status().isNotFound());
+			mockMvc.perform(get("/test/diary/relocation-failed"))
+					.andExpect(status().isInternalServerError())
+					.andExpect(jsonPath("$.status").value(500));
+		} finally {
+			logger.detachAppender(appender);
+		}
+
+		assertThat(appender.list).singleElement().satisfies(event -> {
+			assertThat(event.getLevel()).isEqualTo(Level.ERROR);
+			assertThat(event.getFormattedMessage())
+					.contains("reason=DIARY_IMAGE_RELOCATION_FAILED", "status=500")
+					.doesNotContain("PRIVATE-RELOCATION-FAILURE", "PRIVATE-STORAGE-FAILURE");
+			assertThat(event.getThrowableProxy()).isNull();
+		});
+	}
+
 	@RestController
 	static class TestController {
+		@GetMapping("/test/diary/relocation-failed")
+		String relocationFailed() {
+			throw new DiaryImageRelocationException("PRIVATE-RELOCATION-FAILURE",
+					new IllegalStateException("PRIVATE-STORAGE-FAILURE"));
+		}
+
 		@GetMapping("/test/diary/not-found")
 		String notFound() {
 			throw new DiaryNotFoundException();

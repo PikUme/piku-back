@@ -21,7 +21,7 @@ public class SocialEventListener {
 
 	@EventListener
 	public void handleCommentCreated(SocialNotificationEvent.CommentCreated event) {
-		log.info("[SocialEventListener] 댓글 생성 이벤트 수신 - receiverId: {}, senderId: {}, diaryId: {}",
+		log.debug("event=comment_created_received receiverUserId={} senderUserId={} resourceId={}",
 				event.receiverId(), event.senderId(), event.diaryId());
 
 		NotificationKind kind = event.isReply() ? NotificationKind.REPLY : NotificationKind.COMMENT;
@@ -31,7 +31,7 @@ public class SocialEventListener {
 
 	@EventListener
 	public void handleLikeCreated(SocialNotificationEvent.LikeCreated event) {
-		log.info("[SocialEventListener] 좋아요 이벤트 수신 - receiverId: {}, senderId: {}, diaryId: {}",
+		log.debug("event=like_created_received receiverUserId={} senderUserId={} resourceId={}",
 				event.receiverId(), event.senderId(), event.diaryId());
 
 		recordNotificationUseCase.recordNotification(new RecordNotificationCommand(
@@ -41,7 +41,7 @@ public class SocialEventListener {
 
 	@EventListener
 	public void handleFriendRequest(SocialNotificationEvent.FriendRequest event) {
-		log.info("[SocialEventListener] 친구 요청 이벤트 수신 - receiverId: {}, senderId: {}",
+		log.debug("event=friend_request_received receiverUserId={} senderUserId={}",
 				event.receiverId(), event.senderId());
 
 		recordNotificationUseCase.recordNotification(new RecordNotificationCommand(
@@ -51,7 +51,7 @@ public class SocialEventListener {
 
 	@EventListener
 	public void handleFriendAccepted(SocialNotificationEvent.FriendAccepted event) {
-		log.info("[SocialEventListener] 친구 수락 이벤트 수신 - receiverId: {}, senderId: {}",
+		log.debug("event=friend_accepted_received receiverUserId={} senderUserId={}",
 				event.receiverId(), event.senderId());
 
 		recordNotificationUseCase.recordNotification(new RecordNotificationCommand(

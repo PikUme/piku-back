@@ -132,7 +132,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<ProblemDetail> handleNoResourceFoundException(NoResourceFoundException e,
             HttpServletRequest request) {
-        log.warn("Resource not found at path: {}", e.getResourcePath());
+        log.warn("event=request_failed outcome=not_found reason=resource_not_found status=404");
         return buildProblem(CommonProblemType.RESOURCE_NOT_FOUND, "요청한 리소스를 찾을 수 없습니다.", request);
     }
 
@@ -140,7 +140,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ProblemDetail> handleIOException(IOException ex, HttpServletRequest request) {
         if (isClientDisconnected(ex)) {
             // 클라이언트가 스트림 중간에 연결을 끊은 케이스
-            log.debug("스트림 중단: 클라이언트 연결 끊김 - {} {}", request.getMethod(), request.getRequestURI());
+            log.debug("event=request_stream_closed outcome=disconnected reason=client_disconnect");
             return ResponseEntity.noContent().build();
         }
 
@@ -154,7 +154,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AsyncRequestNotUsableException.class)
     public void handleAsyncRequestNotUsableException(AsyncRequestNotUsableException e, HttpServletRequest request) {
         if (isClientDisconnected(e)) {
-            log.debug("비동기 스트림 중단: 클라이언트 연결 끊김 - {} {}", request.getMethod(), request.getRequestURI());
+            log.debug("event=async_request_stream_closed outcome=disconnected reason=client_disconnect");
             return;
         }
 

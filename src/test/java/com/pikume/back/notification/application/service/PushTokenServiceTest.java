@@ -1,5 +1,6 @@
 package com.pikume.back.notification.application.service;
 
+import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -47,6 +48,9 @@ class PushTokenServiceTest {
 	@Test
 	@DisplayName("Push Token 등록·해제 로그에 raw deviceId를 남기지 않는다")
 	void doesNotLogRawDeviceId() {
+		Logger logger = (Logger) LoggerFactory.getLogger(PushTokenService.class);
+		Level previousLevel = logger.getLevel();
+		logger.setLevel(Level.DEBUG);
 		ListAppender<ILoggingEvent> appender = attachLogAppender();
 
 		try {
@@ -54,8 +58,10 @@ class PushTokenServiceTest {
 			service.revokePushTokenForDevice("user-id", "sensitive-device-id");
 		} finally {
 			detachLogAppender(appender);
+			logger.setLevel(previousLevel);
 		}
 
+		assertThat(appender.list).isNotEmpty();
 		assertThat(appender.list)
 				.extracting(ILoggingEvent::getFormattedMessage)
 				.noneMatch(message -> message.contains("sensitive-device-id"));

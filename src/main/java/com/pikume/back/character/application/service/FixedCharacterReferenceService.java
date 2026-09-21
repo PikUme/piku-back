@@ -42,9 +42,9 @@ public class FixedCharacterReferenceService
 			String objectKey = canonicalizeFixedCharacterObjectKeyPort.canonicalizeFixedCharacterObjectKey(storedReference);
 			return objectKey.isBlank() ? Optional.empty() : Optional.of(objectKey);
 		} catch (IllegalArgumentException exception) {
-			log.warn("잘못된 fixed character image reference입니다. characterId={} reason={}",
+			log.warn("event=fixed_character_reference_invalid outcome=skipped resourceId={} exception={}",
 					characterId,
-					exception.getMessage());
+					exception.getClass().getSimpleName());
 			return Optional.empty();
 		}
 	}

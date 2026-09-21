@@ -19,15 +19,12 @@ public class CharacterDataInitializer implements CommandLineRunner {
 
 	@Override
 	public void run(String... args) throws Exception {
-		log.info("고정 캐릭터 데이터 동기화를 시작합니다...");
-
 		int newCharactersAdded = synchronizeFixedCharacterCatalogUseCase.synchronizeFixedCharacterCatalog();
 
 		if (newCharactersAdded > 0) {
-			log.info("새로운 고정 캐릭터 {}개가 DB에 추가되었습니다.", newCharactersAdded);
+			log.info("event=fixed_character_catalog_synchronized outcome=success addedCount={}", newCharactersAdded);
 		} else {
-			log.info("MinIO catalog에서 DB에 추가할 새로운 고정 캐릭터를 찾지 못했습니다.");
+			log.debug("event=fixed_character_catalog_synchronized outcome=unchanged addedCount=0");
 		}
-		log.info("고정 캐릭터 데이터 동기화 완료.");
 	}
 }

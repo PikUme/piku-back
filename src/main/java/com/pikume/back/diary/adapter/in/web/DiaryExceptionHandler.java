@@ -3,6 +3,7 @@ package com.pikume.back.diary.adapter.in.web;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -18,6 +19,7 @@ import java.util.Map;
 
 @RestControllerAdvice(basePackages = { "com.pikume.back.diary", "com.pikume.back.comment" })
 @RequiredArgsConstructor
+@Slf4j
 public class DiaryExceptionHandler {
 
 	private final ProblemDetailFactory problemDetailFactory;
@@ -30,7 +32,12 @@ public class DiaryExceptionHandler {
 
 	@ExceptionHandler(DiaryException.class)
 	public ResponseEntity<ProblemDetail> handleDiaryException(DiaryException ex, HttpServletRequest request) {
-		return problem(DiaryProblemType.from(ex.getErrorCode()), ex.getMessage(), request);
+		DiaryProblemType problemType = DiaryProblemType.from(ex.getErrorCode());
+		if (problemType.status().is5xxServerError()) {
+			log.error("event=diary_request_failed outcome=failed reason={} status={} exception={}",
+					ex.getErrorCode(), problemType.status().value(), ex.getClass().getSimpleName());
+		}
+		return problem(problemType, ex.getMessage(), request);
 	}
 
 	@ExceptionHandler(InvalidDiaryGalleryCursorException.class)

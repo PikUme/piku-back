@@ -55,10 +55,9 @@ public class PhotoOptimizationService {
 			String optimizedKey = PhotoWebpObjectKey.fromOriginal(target.originalUrl()).orElse(null);
 			if (optimizedKey == null) {
 				savePhotoOptimizationPort.markPhotoOptimizationSkipped(target.photoId(), LocalDateTime.now());
-				log.info("event=photo_optimization outcome=skipped photoId={} diaryId={} objectKey={}",
+				log.debug("event=photo_optimization outcome=skipped photoId={} diaryId={}",
 						target.photoId(),
-						target.diaryId(),
-						target.originalUrl());
+						target.diaryId());
 				return false;
 			}
 			byte[] originalBytes = loadObjectPort.load(target.originalUrl());
@@ -66,22 +65,19 @@ public class PhotoOptimizationService {
 
 			storeObjectPort.store(optimizedKey, WEBP_CONTENT_TYPE, webpBytes);
 			savePhotoOptimizationPort.markPhotoOptimizationSucceeded(target.photoId(), optimizedKey, LocalDateTime.now());
-			log.info("event=photo_optimization outcome=succeeded photoId={} diaryId={} objectKey={} optimizedKey={}",
+			log.info("event=photo_optimization outcome=succeeded photoId={} diaryId={}",
 					target.photoId(),
-					target.diaryId(),
-					target.originalUrl(),
-					optimizedKey);
+					target.diaryId());
 			return true;
 		} catch (Exception e) {
 			PhotoOptimizationStatus nextStatus = nextFailureStatus(target);
 			savePhotoOptimizationPort.markPhotoOptimizationFailed(target.photoId(), nextStatus, LocalDateTime.now());
-			log.warn("event=photo_optimization outcome=failed photoId={} diaryId={} status={} attemptCount={} objectKey={} reason={}",
+			log.warn("event=photo_optimization outcome=failed photoId={} diaryId={} status={} attemptCount={} exception={}",
 					target.photoId(),
 					target.diaryId(),
 					nextStatus,
 					target.attemptCount() + 1,
-					target.originalUrl(),
-					e.getMessage());
+					e.getClass().getSimpleName());
 			return false;
 		}
 	}

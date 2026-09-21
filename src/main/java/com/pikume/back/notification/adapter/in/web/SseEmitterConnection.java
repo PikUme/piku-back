@@ -1,5 +1,6 @@
 package com.pikume.back.notification.adapter.in.web;
 
+import com.pikume.back.global.logging.RequestIdContext;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import com.pikume.back.notification.application.dto.NotificationStreamMessage;
 import com.pikume.back.notification.application.exception.NotificationStreamSendException;
@@ -13,9 +14,11 @@ public class SseEmitterConnection implements NotificationStreamConnection {
 	private static final String COMPLETED_EMITTER_MESSAGE = "ResponseBodyEmitter has already completed";
 
 	private final SseEmitter emitter;
+	private final RequestIdContext requestContext;
 
 	public SseEmitterConnection(long timeoutMillis) {
 		this.emitter = new SseEmitter(timeoutMillis);
+		this.requestContext = RequestIdContext.capture();
 	}
 
 	public SseEmitter emitter() {
@@ -24,17 +27,17 @@ public class SseEmitterConnection implements NotificationStreamConnection {
 
 	@Override
 	public void onCompletion(Runnable action) {
-		emitter.onCompletion(action);
+		emitter.onCompletion(requestContext.wrap(action));
 	}
 
 	@Override
 	public void onTimeout(Runnable action) {
-		emitter.onTimeout(action);
+		emitter.onTimeout(requestContext.wrap(action));
 	}
 
 	@Override
 	public void onError(Consumer<Throwable> action) {
-		emitter.onError(action);
+		emitter.onError(requestContext.wrap(action));
 	}
 
 	@Override

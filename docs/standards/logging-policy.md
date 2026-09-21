@@ -3,7 +3,7 @@
 - Status: Active
 - Audience: Engineers
 - Source of Truth: Yes
-- Last Reviewed: 2026-07-11
+- Last Reviewed: 2026-09-20
 
 ## 목표
 
@@ -72,6 +72,7 @@ Piku 백엔드의 애플리케이션 로그를 개인정보 최소화 원칙에 
 - `deviceId`
 - `client IP`
 - 인증 코드, 검증 코드, 비밀번호
+- 댓글 본문과 운영 추적에 불필요한 사용자 입력 원문
 
 이번 서비스 특성상 운영 중 raw 이메일을 로그에서 직접 확인해야 할 필요가 드물기 때문에, 이메일은 마스킹도 기본 정책에서 제외한다. 즉 “마스킹된 이메일을 남기는 것”이 아니라 “이메일 자체를 남기지 않는 것”이 기본값이다.
 
@@ -159,6 +160,7 @@ event=unexpected_error outcome=failed requestId=... exception=IllegalStateExcept
 - JWT 파싱 성공
 - JWT 필터 인증 성공
 - 토큰 생성 완료
+- 친구 목록, 일기 상세, 댓글 목록 등 단순 조회 요청과 페이징 조건
 
 즉 “요청마다 반복되는 성공 로그”는 기본적으로 `INFO`에 두지 않는다.
 
@@ -178,10 +180,26 @@ event=unexpected_error outcome=failed requestId=... exception=IllegalStateExcept
 
 ### `requestId`
 
-- 모든 HTTP 요청에 `requestId`를 부여한다.
-- 외부에서 들어온 `X-Request-Id`가 있으면 재사용할 수 있다.
-- 없으면 서버가 생성한다.
-- 로그 MDC에 저장해 모든 하위 로그에서 자동 포함되게 한다.
+- 모든 HTTP 요청에 `requestId`를 부여하고 `X-Request-Id` 응답 헤더로 반환한다.
+- Nginx는 외부 요청의 ID 헤더를 자체 생성한 값으로 교체한다. 백엔드는 단일 헤더의 유효한 32자리 16진수 ID를 그대로 사용한다.
+- 헤더가 없거나 비정상·중복이면 백엔드가 새 32자리 ID를 생성한다. 잘못된 헤더 때문에 업무 요청을 거절하지 않으며, 폐기한 헤더 원문을 로그로 남기지 않는다.
+- Nginx를 거치지 않는 로컬 개발도 같은 방식으로 동작한다. 백엔드 직접 접근 제한은 운영 네트워크의 책임이며 ID 자체를 인증이나 권한 판단에 사용하지 않는다.
+- ID는 요청 최초 진입 시 한 번 결정하고 비동기·오류 재디스패치에서도 유지한다.
+- MDC의 `requestId`를 콘솔·파일의 공통 출력 패턴에 포함한다. 개별 이벤트 메시지에서 같은 값을 중복 작성하거나 모든 로그에 `requestIdSource`를 추가하지 않는다.
+- 요청과 무관한 애플리케이션 시작·예약 작업은 `requestId=none`으로 표시한다. 요청 ID가 없는 정상적인 실행 문맥이며 새 HTTP 요청으로 취급하지 않는다.
+- 요청 처리와 요청에서 파생된 비동기 작업·콜백이 끝나면 해당 실행 스레드의 이전 문맥을 복원한다. 요청과 무관한 시작·예약 작업에 이전 요청의 ID가 남지 않아야 한다.
+- Spring MVC 비동기 처리, SSE 수명주기 콜백과 외부 HTTP 콜백은 기술 어댑터 경계에서 문맥을 전달한다. Domain과 Application 계약에 HTTP 헤더·Servlet·MDC 의존성을 추가하지 않는다.
+
+#### 백엔드 생성 이벤트
+
+백엔드가 새 ID를 생성했을 때만 `event=request_id_generated`를 한 요청에서 한 번 남긴다. `reason=missing_header` 또는 `reason=invalid_header`로 사유를 구분하며, 같은 요청의 이후 로그는 공통 `requestId`로 연결한다.
+
+- `prod`: Nginx의 헤더 전달 누락을 확인할 수 있도록 일반 요청의 생성은 `WARN`으로 기록한다. Nginx를 우회하는 Docker 상태 검사·모니터링용 관리 엔드포인트의 생성은 정상 흐름이므로 `DEBUG`로 기록한다.
+- 개발·테스트 및 기본 로컬 실행: Nginx 없이 직접 요청하는 정상 흐름이므로 `DEBUG`로 기록한다.
+
+기본 로그 레벨이 `INFO`라면 로컬의 생성 이벤트는 보이지 않아도 다른 애플리케이션 로그와 응답 헤더에는 생성한 ID가 포함된다. 로컬에서 `prod` 프로필을 사용해 직접 호출하면 생성 경고가 발생할 수 있다.
+
+브라우저 개발자 도구에서는 응답 헤더를 확인할 수 있다. 다른 출처의 JavaScript에서 이 헤더를 읽는 기능은 별도의 CORS 노출 정책 대상이며, 요청 ID 로깅만을 위해 기존 CORS 권한을 확대하지 않는다.
 
 ### `userId`
 

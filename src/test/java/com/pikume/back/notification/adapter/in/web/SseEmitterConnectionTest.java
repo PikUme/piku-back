@@ -1,6 +1,12 @@
 package com.pikume.back.notification.adapter.in.web;
 
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.slf4j.MDC;
+import java.util.function.Consumer;
+import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -35,6 +41,37 @@ class SseEmitterConnectionTest {
 		assertThatThrownBy(() -> connection.send(new NotificationStreamMessage("event-id", null, "data")))
 				.isSameAs(unexpectedFailure);
 	}
+
+    @AfterEach
+    void clearContext() {
+        MDC.clear();
+    }
+
+    @SuppressWarnings("unchecked")
+    @ParameterizedTest
+    @ValueSource(strings = {"completionCallback", "timeoutCallback", "errorCallback"})
+    void lifecycleCallbacksUseConnectionContextAndRestoreWorker(String callbackName) {
+        MDC.put("requestId", "11111111111111111111111111111111");
+        SseEmitterConnection connection = new SseEmitterConnection(1000L);
+        Runnable action = () -> {
+            assertThat(MDC.get("requestId")).isEqualTo("11111111111111111111111111111111");
+            throw new IllegalStateException("callback failure");
+        };
+        connection.onCompletion(action);
+        connection.onTimeout(action);
+        connection.onError(error -> action.run());
+        MDC.put("requestId", "22222222222222222222222222222222");
+        Object callback = ReflectionTestUtils.getField(connection.emitter(), callbackName);
+
+        assertThatThrownBy(() -> {
+            if (callback instanceof Runnable runnable) {
+                runnable.run();
+            } else {
+                ((Consumer<Throwable>) callback).accept(new IllegalArgumentException("transport"));
+            }
+        }).isInstanceOf(IllegalStateException.class).hasMessage("callback failure");
+        assertThat(MDC.get("requestId")).isEqualTo("22222222222222222222222222222222");
+    }
 
 	private static class ThrowingSseEmitter extends SseEmitter {
 

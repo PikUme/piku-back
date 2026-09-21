@@ -1,5 +1,6 @@
 package com.pikume.back.creative.adapter.out.ai.gemini;
 
+import com.pikume.back.global.logging.RequestIdContext;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -43,7 +44,8 @@ public class GeminiDiaryIllustrationAdapter implements GenerateDiaryIllustration
 
 	@Override
 	public GeneratedIllustrationPayload generate(DiaryIllustrationRequest request) {
-		log.info("Gemini 일기 이미지 생성 요청");
+		log.debug("event=diary_illustration_generation outcome=started");
+		RequestIdContext requestContext = RequestIdContext.capture();
 
 		try {
 			String response = webClientBuilder
@@ -56,9 +58,9 @@ public class GeminiDiaryIllustrationAdapter implements GenerateDiaryIllustration
 					.retrieve()
 					.bodyToMono(String.class)
 					.timeout(timeout)
-					.doOnError(WebClientResponseException.class, error -> log.error(
-							"Gemini API 이미지 생성 HTTP 오류: status={}",
-							error.getStatusCode()))
+					.doOnError(WebClientResponseException.class, requestContext.wrap(error -> log.error(
+							"event=diary_illustration_generation outcome=failed reason=provider_http_error status={} exception={}",
+							error.getStatusCode().value(), error.getClass().getSimpleName())))
 					.block();
 
 			if (response == null || response.isBlank()) {
@@ -73,8 +75,10 @@ public class GeminiDiaryIllustrationAdapter implements GenerateDiaryIllustration
 			return new GeneratedIllustrationPayload(imageBase64, "png");
 		} catch (CreativeException e) {
 			throw e;
+		} catch (WebClientResponseException e) {
+			throw new CreativeException(CreativeErrorCode.IMAGE_GENERATION_FAILED, e);
 		} catch (Exception e) {
-			log.error("Gemini 일기 이미지 생성 실패: {}", e.getClass().getSimpleName());
+			log.error("event=diary_illustration_generation outcome=failed exception={}", e.getClass().getSimpleName());
 			throw new CreativeException(CreativeErrorCode.IMAGE_GENERATION_FAILED, e);
 		}
 	}
@@ -130,7 +134,7 @@ public class GeminiDiaryIllustrationAdapter implements GenerateDiaryIllustration
 		} catch (CreativeException e) {
 			throw e;
 		} catch (Exception e) {
-			log.error("Gemini 이미지 응답 파싱 실패: {}", e.getClass().getSimpleName());
+			log.error("event=diary_illustration_generation outcome=failed reason=invalid_response exception={}", e.getClass().getSimpleName());
 			throw new CreativeException(CreativeErrorCode.IMAGE_GENERATION_FAILED, e);
 		}
 	}

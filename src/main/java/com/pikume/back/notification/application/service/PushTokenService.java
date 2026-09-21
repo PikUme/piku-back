@@ -18,13 +18,13 @@ public class PushTokenService implements RegisterPushTokenUseCase, RevokePushTok
 
 	@Override
 	public void registerPushToken(String userId, String token, String deviceId) {
-		log.info("event=fcm_token_save_requested userId={}", userId);
+		log.debug("event=fcm_token_save_requested userId={}", userId);
 		registerPushTokenPort.registerPushToken(userId, token, deviceId);
 	}
 
 	@Override
 	public void revokePushTokenForDevice(String userId, String deviceId) {
-		log.info("event=fcm_device_token_revoke_requested userId={}", userId);
+		log.debug("event=fcm_device_token_revoke_requested userId={}", userId);
 		revokePushTokenPort.revokePushTokenForDevice(userId, deviceId);
 	}
 }

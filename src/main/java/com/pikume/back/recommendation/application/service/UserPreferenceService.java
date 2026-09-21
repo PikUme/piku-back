@@ -66,7 +66,7 @@ public class UserPreferenceService
 				.orElseGet(() -> recordUserPreferencePort.recordUserPreference(
 						UserPreference.create(userId, recommendationClockPort.now())));
 		preference.recordInteraction(topic, interactionType, recommendationClockPort.now());
-		log.debug("상호작용 기록 - userId: {}, topic: {}, type: {}, weight: {}",
-				userId, topic, interactionType, interactionType.weight());
+		log.debug("event=topic_interaction_recorded outcome=success userId={} interactionType={} weight={}",
+				userId, interactionType, interactionType.weight());
 	}
 }

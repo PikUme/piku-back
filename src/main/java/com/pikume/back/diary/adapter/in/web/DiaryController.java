@@ -60,11 +60,12 @@ public class DiaryController {
 			@Parameter(description = "필수 일기 데이터 (JSON 형식)", required = true, schema = @Schema(implementation = DiaryDTO.class)) @Valid @RequestPart("diary") DiaryDTO diary,
 			@Parameter(description = "선택 사진 파일. 생략하면 사진 없이 등록하며, 명시적인 빈 파일은 유효하지 않아 거부합니다.", required = false) @RequestPart(value = "photos", required = false) List<MultipartFile> photos,
 			@AuthenticationPrincipal UserPrincipal userDetails) throws IOException {
-		log.info("{}님 일기와 사진 {}개 등록 요청", userDetails.getId(), photos == null ? 0 : photos.size());
 		DiaryCreatedResult result = createDiaryUseCase.createDiary(
 				toCreateDiaryCommand(diary),
 				toUploadedFiles(photos),
 				userDetails.getId());
+		log.info("event=diary_created outcome=success userId={} resourceId={} photoCount={}",
+				userDetails.getId(), result.diaryId(), photos == null ? 0 : photos.size());
 		return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED)
 				.body(new ResponseDiaryDTO(result.diaryId(), result.content()));
 	}
@@ -74,8 +75,8 @@ public class DiaryController {
 	public ResponseEntity<Void> deleteDiary(
 			@Parameter(description = "일기 ID") @PathVariable Long diaryId,
 			@AuthenticationPrincipal UserPrincipal userDetails) {
-		log.info("{}님 일기 ID [{}] 삭제 요청", userDetails.getId(), diaryId);
 		deleteDiaryUseCase.deleteDiary(diaryId, userDetails.getId());
+		log.info("event=diary_deleted outcome=success userId={} resourceId={}", userDetails.getId(), diaryId);
 		return ResponseEntity.noContent().build();
 	}
 
@@ -85,11 +86,11 @@ public class DiaryController {
 			@Parameter(description = "일기 ID") @PathVariable Long diaryId,
 			@Valid @RequestBody UpdateDiaryRequest request,
 			@AuthenticationPrincipal UserPrincipal userDetails) {
-		log.info("{}님 일기 ID [{}] 수정 요청", userDetails.getId(), diaryId);
 		DiaryUpdatedResult result = updateDiaryUseCase.updateDiary(
 				diaryId,
 				toUpdateDiaryCommand(request),
 				userDetails.getId());
+		log.info("event=diary_updated outcome=success userId={} resourceId={}", userDetails.getId(), diaryId);
 		return ResponseEntity.ok(new UpdateDiaryResponse(result.diaryId(), result.status(), result.content()));
 	}
 

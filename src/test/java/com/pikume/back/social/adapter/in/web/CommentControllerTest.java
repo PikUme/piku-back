@@ -1,5 +1,14 @@
 package com.pikume.back.social.adapter.in.web;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import org.slf4j.LoggerFactory;
+import com.pikume.back.social.adapter.in.web.dto.CommentRequestDto;
+import com.pikume.back.social.adapter.in.web.dto.CommentUpdateDto;
+import com.pikume.back.social.application.dto.CommentResult;
+import java.time.LocalDateTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -27,6 +36,8 @@ import com.pikume.back.social.application.port.in.DeleteCommentUseCase;
 import com.pikume.back.social.application.port.in.QueryCommentPageUseCase;
 import com.pikume.back.social.application.port.in.UpdateCommentUseCase;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
@@ -82,6 +93,44 @@ class CommentControllerTest {
 				.andExpect(jsonPath("$.type").value(SocialProblemType.DIARY_NOT_FOUND.type().toString()))
 				.andExpect(jsonPath("$.status").value(404))
 				.andExpect(jsonPath("$.detail").value(SocialErrorCode.DIARY_NOT_FOUND.message()));
+	}
+
+	@Test
+	@DisplayName("댓글 본문은 기록하지 않고 변경 성공 시에만 INFO를 남긴다")
+	void logsSuccessfulChangesWithoutCommentContent() {
+		String privateContent = "PRIVATE-COMMENT-CONTENT";
+		String privateUpdate = "PRIVATE-UPDATED-CONTENT";
+		String privateFailure = "PRIVATE-FAILED-CONTENT";
+		given(createCommentUseCase.createComment(1L, privateContent, null, "viewer-id"))
+				.willReturn(new CommentResult(2L, privateContent, LocalDateTime.now()));
+		given(updateCommentUseCase.updateComment(2L, privateUpdate, "viewer-id"))
+				.willReturn(new CommentResult(2L, privateUpdate, LocalDateTime.now()));
+		given(updateCommentUseCase.updateComment(2L, privateFailure, "viewer-id"))
+				.willThrow(new SocialException(SocialErrorCode.DIARY_NOT_FOUND));
+		Logger logger = (Logger) LoggerFactory.getLogger(CommentController.class);
+		Level previousLevel = logger.getLevel();
+		logger.setLevel(Level.DEBUG);
+		ListAppender<ILoggingEvent> appender = new ListAppender<>();
+		appender.start();
+		logger.addAppender(appender);
+
+		try {
+			commentController.createComment(new CommentRequestDto(1L, privateContent, null), userDetails);
+			commentController.updateComment(2L, new CommentUpdateDto(privateUpdate), userDetails);
+			assertThat(appender.list.stream().filter(event -> event.getLevel() == Level.INFO)).hasSize(2);
+			int successfulLogCount = appender.list.size();
+
+			assertThatThrownBy(() -> commentController.updateComment(
+					2L, new CommentUpdateDto(privateFailure), userDetails))
+					.isInstanceOf(SocialException.class);
+			assertThat(appender.list).hasSize(successfulLogCount);
+			assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage)
+					.noneMatch(message -> message.contains(privateContent)
+							|| message.contains(privateUpdate) || message.contains(privateFailure));
+		} finally {
+			logger.detachAppender(appender);
+			logger.setLevel(previousLevel);
+		}
 	}
 
 	private record AuthenticationPrincipalResolver(UserPrincipal userDetails) implements HandlerMethodArgumentResolver {

@@ -1,5 +1,6 @@
 package com.pikume.back.global.notification;
 
+import com.pikume.back.global.logging.RequestIdContext;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +29,7 @@ public class DiscordWebhookService {
     public void sendExceptionNotification(Exception e, HttpServletRequest request) {
         log.debug("event=exception_notification outcome=started");
         DiscordMessage discordMessage = getDiscordMessage(e, request);
+        RequestIdContext requestContext = RequestIdContext.capture();
 
         webClientBuilder.build()
             .post()
@@ -35,10 +37,10 @@ public class DiscordWebhookService {
             .bodyValue(discordMessage)
             .retrieve()
             .bodyToMono(Void.class)
-            .doOnSuccess(v -> log.debug("event=exception_notification outcome=success"))
-            .doOnError(error -> log.error("event=exception_notification outcome=failed exception={}",
-                    error.getClass().getSimpleName()))
-            .subscribe();
+            .doOnSuccess(requestContext.wrap(v -> log.debug("event=exception_notification outcome=success")))
+            .subscribe(v -> { }, requestContext.wrap(error ->
+                    log.error("event=exception_notification outcome=failed exception={}",
+                            error.getClass().getSimpleName())));
     }
 
     private static DiscordMessage getDiscordMessage(Exception e, HttpServletRequest request) {

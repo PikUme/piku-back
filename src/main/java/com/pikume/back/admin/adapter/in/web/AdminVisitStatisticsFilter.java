@@ -56,7 +56,7 @@ public class AdminVisitStatisticsFilter extends OncePerRequestFilter implements 
 			String visitorKey = userId != null ? hash("user:" + userId) : anonymousVisitorKey(request);
 			recordAdminStatisticsEventUseCase.record(AdminStatisticsEventType.VISIT, userId, visitorKey);
 		} catch (RuntimeException e) {
-			log.warn("event=visit_statistics_record_failed path={} reason={}", request.getRequestURI(), e.getMessage());
+			log.warn("event=visit_statistics_record_failed outcome=failed exception={}", e.getClass().getSimpleName());
 		}
 	}
 

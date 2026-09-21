@@ -38,9 +38,10 @@ public class FeedClickService implements RecordFeedClickUseCase {
 	private void updateUserPreferenceOnClick(String userId, Long diaryId) {
 		try {
 			recordFeedClickPreferencePort.recordClickPreference(userId, diaryId);
-			log.debug("클릭 기반 선호도 업데이트 - userId: {}, diaryId: {}", userId, diaryId);
+			log.debug("event=feed_click_preference_updated outcome=success userId={} resourceId={}", userId, diaryId);
 		} catch (Exception e) {
-			log.warn("선호도 업데이트 실패 - userId: {}, diaryId: {}", userId, diaryId);
+			log.warn("event=feed_click_preference_update_failed outcome=failed userId={} resourceId={} exception={}",
+					userId, diaryId, e.getClass().getSimpleName());
 		}
 	}
 }

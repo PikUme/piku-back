@@ -60,13 +60,13 @@ public class CommentController {
 	@PostMapping
 	public ResponseEntity<CommentResponseDto> createComment(@RequestBody CommentRequestDto commentRequestDto,
 			@AuthenticationPrincipal UserPrincipal userDetails) {
-		log.info("사용자 {}님이 {} 일기, {} 댓글에 댓글 등록 요청, 댓글 내용: {}", userDetails.getId(), commentRequestDto.getDiaryId(),
-				commentRequestDto.getParentId(), commentRequestDto.getContent());
 		CommentResult isSaved = createCommentUseCase.createComment(
 				commentRequestDto.getDiaryId(),
 				commentRequestDto.getContent(),
 				commentRequestDto.getParentId(),
 				userDetails.getId());
+		log.info("event=comment_created outcome=success userId={} resourceId={} diaryId={}",
+				userDetails.getId(), isSaved.id(), commentRequestDto.getDiaryId());
 
 		return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(isSaved));
 	}
@@ -81,8 +81,8 @@ public class CommentController {
 	@PatchMapping("/{commentId}")
 	public ResponseEntity<CommentResponseDto> updateComment(@PathVariable Long commentId,
 			@RequestBody CommentUpdateDto updateDto, @AuthenticationPrincipal UserPrincipal userDetails) {
-		log.info("사용자 {}님이 {} 댓글 수정 요청, 수정할 댓글 내용: {}", userDetails.getId(), commentId, updateDto.getContent());
 		CommentResult isSaved = updateCommentUseCase.updateComment(commentId, updateDto.getContent(), userDetails.getId());
+		log.info("event=comment_updated outcome=success userId={} resourceId={}", userDetails.getId(), commentId);
 
 		return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(isSaved));
 	}
@@ -97,7 +97,7 @@ public class CommentController {
 			@RequestParam Long diaryId,
 			@ParameterObject @PageableDefault(sort = "createdAt", direction = Sort.Direction.DESC, size = 10) Pageable pageable,
 			@AuthenticationPrincipal UserPrincipal userDetails) {
-		log.info("일기 {}의 원댓글 조회 요청, page: {}, size: {}", diaryId, pageable.getPageNumber(), pageable.getPageSize());
+		log.debug("event=root_comments_requested resourceId={} page={} size={}", diaryId, pageable.getPageNumber(), pageable.getPageSize());
 
 		String viewerId = userDetails != null ? userDetails.getId() : null;
 		PageQuery pageQuery = SpringPageMapper.toPageQuery(pageable);
@@ -120,7 +120,7 @@ public class CommentController {
 			@PathVariable Long parentCommentId,
 			@ParameterObject @PageableDefault(sort = "createdAt", direction = Sort.Direction.ASC, size = 10) Pageable pageable,
 			@AuthenticationPrincipal UserPrincipal userDetails) {
-		log.info("부모 댓글 {}에 대한 대댓글 조회 요청, page: {}, size: {}", parentCommentId, pageable.getPageNumber(),
+		log.debug("event=comment_replies_requested resourceId={} page={} size={}", parentCommentId, pageable.getPageNumber(),
 				pageable.getPageSize());
 
 		String viewerId = userDetails != null ? userDetails.getId() : null;
@@ -143,8 +143,8 @@ public class CommentController {
 	@DeleteMapping("/{commentId}")
 	public ResponseEntity<CommentDeleteResponseDto> deleteComment(@PathVariable Long commentId,
 			@AuthenticationPrincipal UserPrincipal userDetails) {
-		log.info("사용자 {}님이 {} 댓글 삭제 요청", userDetails.getId(), commentId);
 		CommentDeleteResult isDeleted = deleteCommentUseCase.deleteComment(commentId, userDetails.getId());
+		log.info("event=comment_deleted outcome=success userId={} resourceId={}", userDetails.getId(), commentId);
 
 		return ResponseEntity.status(HttpStatus.OK).body(toResponse(isDeleted));
 	}

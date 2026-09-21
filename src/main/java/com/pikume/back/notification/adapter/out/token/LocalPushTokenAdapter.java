@@ -24,16 +24,16 @@ public class LocalPushTokenAdapter implements
 
 	@Override
 	public void registerPushToken(String userId, String token, String deviceId) {
-		log.info("event=local_fcm_token_save_requested outcome=skipped userId={}", userId);
+		log.debug("event=local_fcm_token_save_requested outcome=skipped userId={}", userId);
 	}
 
 	@Override
 	public void revokePushToken(String token) {
-		log.info("event=local_fcm_token_revoke_requested outcome=skipped");
+		log.debug("event=local_fcm_token_revoke_requested outcome=skipped");
 	}
 
 	@Override
 	public void revokePushTokenForDevice(String userId, String deviceId) {
-		log.info("event=local_fcm_device_token_revoke_requested outcome=skipped userId={}", userId);
+		log.debug("event=local_fcm_device_token_revoke_requested outcome=skipped userId={}", userId);
 	}
 }

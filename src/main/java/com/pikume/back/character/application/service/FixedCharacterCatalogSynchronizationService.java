@@ -58,8 +58,8 @@ public class FixedCharacterCatalogSynchronizationService implements SynchronizeF
 					.distinct()
 					.toList();
 		} catch (RuntimeException exception) {
-			log.warn("fixed character catalog 조회 실패로 기존 DB 값을 유지합니다. reason={}",
-					exception.getMessage());
+			log.warn("event=fixed_character_catalog_load_failed outcome=unchanged exception={}",
+					exception.getClass().getSimpleName());
 			return List.of();
 		}
 	}
@@ -69,7 +69,7 @@ public class FixedCharacterCatalogSynchronizationService implements SynchronizeF
 			String objectKey = canonicalizeFixedCharacterObjectKeyPort.canonicalizeFixedCharacterObjectKey(reference);
 			return objectKey.isBlank() ? Optional.empty() : Optional.of(objectKey);
 		} catch (IllegalArgumentException exception) {
-			log.warn("잘못된 fixed character image reference를 건너뜁니다. reason={}", exception.getMessage());
+			log.warn("event=fixed_character_reference_invalid outcome=skipped exception={}", exception.getClass().getSimpleName());
 			return Optional.empty();
 		}
 	}

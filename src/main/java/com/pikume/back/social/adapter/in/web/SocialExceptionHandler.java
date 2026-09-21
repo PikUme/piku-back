@@ -20,8 +20,9 @@ public class SocialExceptionHandler {
 
 	@ExceptionHandler(SocialException.class)
 	public ResponseEntity<ProblemDetail> handleSocialException(SocialException exception, HttpServletRequest request) {
-		log.warn("SocialException occurred: {}", exception.getMessage());
 		SocialProblemType problemType = SocialProblemType.from(exception.getErrorCode());
+		log.warn("event=social_request_failed outcome=denied reason={} status={}",
+				exception.getErrorCode(), problemType.status().value());
 		ProblemDetail problemDetail = problemDetailFactory.create(
 				problemType, exception.getMessage(), request.getRequestURI());
 		return ResponseEntity.status(problemType.status()).body(problemDetail);
