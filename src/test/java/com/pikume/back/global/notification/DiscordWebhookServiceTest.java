@@ -1,27 +1,72 @@
 package com.pikume.back.global.notification;
 
 import ch.qos.logback.classic.Level;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pikume.back.global.logging.CapturingLogAppender;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.MDC;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.mock.http.client.reactive.MockClientHttpRequest;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.reactive.function.client.ClientResponse;
+import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
+import java.net.URI;
+import java.time.Duration;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 class DiscordWebhookServiceTest {
     @AfterEach
     void clearContext() {
         MDC.clear();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"1234567890abcdef1234567890abcdef"})
+    @NullSource
+    void notificationBodyUsesResolvedContextInsteadOfRawHeader(String requestId) throws Exception {
+        var serializedBody = new AtomicReference<String>();
+        WebClient.Builder builder = WebClient.builder().exchangeFunction(outgoing -> {
+            var transport = new MockClientHttpRequest(HttpMethod.POST, URI.create("https://example.test/webhook"));
+            return outgoing.writeTo(transport, ExchangeStrategies.withDefaults())
+                    .then(Mono.defer(transport::getBodyAsString))
+                    .doOnNext(serializedBody::set)
+                    .thenReturn(ClientResponse.create(HttpStatus.NO_CONTENT).build());
+        });
+        var service = new DiscordWebhookService(builder);
+        ReflectionTestUtils.setField(service, "webhookUrl", "https://example.test/webhook");
+        if (requestId != null) {
+            MDC.put("requestId", requestId);
+        }
+        var request = new MockHttpServletRequest("GET", "/api/sample");
+        request.addHeader("X-Request-Id", "untrusted-header");
+
+        service.sendExceptionNotification(new IllegalStateException("private exception"), request);
+
+        await().atMost(Duration.ofSeconds(5))
+                .untilAsserted(() -> assertThat(serializedBody.get()).isNotNull());
+        var body = new ObjectMapper().readTree(serializedBody.get());
+        var fields = body.path("embeds").get(0).path("fields");
+        assertThat(fields.findValuesAsText("name")).containsOnlyOnce("Request-Id");
+        assertThat(fields).anySatisfy(field -> {
+            assertThat(field.path("name").asText()).isEqualTo("Request-Id");
+            assertThat(field.path("value").asText()).isEqualTo(requestId == null ? "none" : requestId);
+        });
+        assertThat(serializedBody.get()).doesNotContain("untrusted-header", "private exception");
+        assertThat(MDC.get("requestId")).isEqualTo(requestId);
     }
 
     @ParameterizedTest

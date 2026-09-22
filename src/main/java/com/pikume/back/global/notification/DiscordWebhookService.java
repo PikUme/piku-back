@@ -28,8 +28,8 @@ public class DiscordWebhookService {
 
     public void sendExceptionNotification(Exception e, HttpServletRequest request) {
         log.debug("event=exception_notification outcome=started");
-        DiscordMessage discordMessage = getDiscordMessage(e, request);
         RequestIdContext requestContext = RequestIdContext.capture();
+        DiscordMessage discordMessage = getDiscordMessage(e, request, requestContext);
 
         webClientBuilder.build()
             .post()
@@ -43,8 +43,9 @@ public class DiscordWebhookService {
                             error.getClass().getSimpleName())));
     }
 
-    private static DiscordMessage getDiscordMessage(Exception e, HttpServletRequest request) {
+    private static DiscordMessage getDiscordMessage(Exception e, HttpServletRequest request, RequestIdContext context) {
         List<EmbedField> fields = List.of(
+                new EmbedField("Request-Id", context.requestId() == null ? "none" : context.requestId(), false),
                 new EmbedField("Request-URI", request.getRequestURI(), false),
                 new EmbedField("Request-Method", request.getMethod(), false),
                 new EmbedField("Exception", e.getClass().getSimpleName(), false));
