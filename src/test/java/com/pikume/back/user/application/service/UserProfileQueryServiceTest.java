@@ -79,7 +79,7 @@ class UserProfileQueryServiceTest {
 	@Test
 	@DisplayName("프로필 설정 전 회원은 미리보기와 상세 프로필에 노출하지 않는다")
 	void hidesPendingProfile() {
-		User user = User.pending("pending@test.com", "pw", "가입대기_pending", 1L);
+		User user = User.pending("pending@test.com", "pw", "pending", 1L);
 		given(loadUserForProfilePort.loadProfileUser("pending")).willReturn(Optional.of(user));
 
 		assertThatThrownBy(() -> service.queryProfilePreview("pending", "viewer"))

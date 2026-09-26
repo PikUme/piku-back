@@ -41,8 +41,8 @@ class SignupProfileServiceTest {
 		order.verify(users).loadProfileUserForUpdate("user-1");
 	}
 
-	@Test void reserveRejectsReservedPrefix() {
-		assertFailure(() -> service.reserveSignupNickname("user-1", "  가입대기_123　 "), SignupProfileFailure.INVALID_NICKNAME);
+	@Test void reserveRejectsBlankNickname() {
+		assertFailure(() -> service.reserveSignupNickname("user-1", "  　 "), SignupProfileFailure.INVALID_NICKNAME);
 		verify(holds, never()).tryAcquire(any(), any(), any());
 	}
 
@@ -97,16 +97,6 @@ class SignupProfileServiceTest {
 		assertFailure(() -> service.completeSignupProfile("user-1", "other", 1L), SignupProfileFailure.PROFILE_ALREADY_COMPLETED);
 	}
 
-	@Test void identicalLegacyCompletedRetryAcceptsHistoricalReservedPrefix() {
-		User user = new User("user-1", "user@example.com", null, "가입대기_old", 1L);
-		given(users.loadProfileUserForUpdate("user-1")).willReturn(Optional.of(user));
-
-		assertThat(service.completeSignupProfile("user-1", "가입대기_old", 1L).nickname()).isEqualTo("가입대기_old");
-
-		verifyNoInteractions(characters, accounts);
-		verify(holds, never()).isHeldBy(any(), any(), any());
-	}
-
 	@Test void withdrawnUserCannotCompleteEvenIdenticalRetry() {
 		User user = new User("user-1", "user@example.com", null, "nick", 1L);
 		user.withdraw();
@@ -144,7 +134,7 @@ class SignupProfileServiceTest {
 	}
 
 	private User pending() {
-		User user = User.pending("user@example.com", null, "가입대기_123", 1L);
+		User user = User.pending("user@example.com", null, "user", 1L);
 		org.springframework.test.util.ReflectionTestUtils.setField(user, "id", "user-1");
 		return user;
 	}

@@ -14,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -187,13 +188,12 @@ class SignupJourneyIntegrationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans={false,true})
-    void normalizedNicknameReservationCompletionAndRetryShareTheSameValue(boolean mobile) throws Exception {
+    @CsvSource({"false,12345678901234567890", "true,12345678901234567890", "false,가입대기_user", "true,가입대기_user"})
+    void normalizedNicknameReservationCompletionAndRetryShareTheSameValue(boolean mobile, String expected) throws Exception {
         Client client=new Client(mobile);
         authenticate(client,"nickname@gmail.com");
         JsonNode consent=client.request(post(client.base+"/signup/agreements").content(body(Map.of("agreements",List.of(Map.of(
             "type","TERMS","version","v1","agreed",true))))),200);
-        String expected="12345678901234567890";
         JsonNode reservation=client.request(post(client.base+"/signup/nickname").content(body(Map.of("nickname","  "+expected+"　 "))),200);
         assertThat(reservation.get("nickname").asText()).isEqualTo(expected);
         JsonNode repeated=client.request(post(client.base+"/signup/nickname").content(body(Map.of("nickname","\t"+expected+"\n"))),200);
@@ -213,7 +213,7 @@ class SignupJourneyIntegrationTest {
         authenticate(client,"invalidnickname@gmail.com");
         JsonNode consent=client.request(post(client.base+"/signup/agreements").content(body(Map.of("agreements",List.of(Map.of(
             "type","TERMS","version","v1","agreed",true))))),200);
-        for(String nickname:List.of("", "  　 ", "  가입대기_123　 ", "123456789012345678901")) {
+        for(String nickname:List.of("", "  　 ", "123456789012345678901")) {
             for(String endpoint:List.of("nickname","profile")) {
                 JsonNode error=client.request(post(client.base+"/signup/"+endpoint).content(body(Map.of("nickname",nickname,"characterId",defaultCharacterId))),400);
                 assertThat(error.path("code").asText()).isEqualTo("INVALID_NICKNAME");

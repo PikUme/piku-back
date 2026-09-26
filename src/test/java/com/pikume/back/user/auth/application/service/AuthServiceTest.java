@@ -97,14 +97,6 @@ class AuthServiceTest {
         }
 
         @Test
-        void rejectsReservedNicknamePrefix() {
-            assertThatThrownBy(() -> authService.signUp(new SignUpCommand("test@piku.store", "abc@123", "가입대기_123", 1L)))
-                .isInstanceOfSatisfying(AuthException.class,
-                    exception -> assertThat(exception.getErrorCode()).isEqualTo(AuthErrorCode.NICKNAME_ALREADY_EXISTS));
-            then(recordUserAccountPort).shouldHaveNoInteractions();
-        }
-
-        @Test
         void rejectsNicknameAlreadyWrittenBeforeConsumingEmailProof() {
             given(checkUserUniquenessPort.isNicknameInUse(new Nickname("used"))).willReturn(true);
             assertThatThrownBy(() -> authService.signUp(new SignUpCommand("test@piku.store", "abc@123", "used", 1L)))
@@ -112,7 +104,6 @@ class AuthServiceTest {
                     exception -> assertThat(exception.getErrorCode()).isEqualTo(AuthErrorCode.NICKNAME_ALREADY_EXISTS));
             then(recordCompletedEmailVerificationPort).shouldHaveNoInteractions();
         }
-
 
 		@Test
 		@DisplayName("유효하지 않은 닉네임은 다른 Port를 호출하기 전에 거절한다")

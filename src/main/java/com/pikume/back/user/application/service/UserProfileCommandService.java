@@ -49,7 +49,6 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 	@Transactional
 	public boolean reserveIfAvailable(String nickname, String userId) {
 		Nickname requestedNickname = new Nickname(nickname);
-		if (requestedNickname.value().startsWith("가입대기_")) return false;
 		nicknameHoldPort.lockNicknameWrites();
 		User user = loadUserForProfilePort.loadProfileUserForUpdate(userId)
 				.orElseThrow(UserNotFoundException::new);
@@ -145,7 +144,6 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 	@Transactional
 	public SignupNicknameReservation reserveSignupNickname(String userId, String nickname) {
 		Nickname requestedNickname = signupNickname(nickname);
-		validateFinalNickname(requestedNickname);
 		nicknameHoldPort.lockNicknameWrites();
 		User user = loadActiveSignupUser(userId);
 		if (!user.isProfileSetupRequired()) {
@@ -174,7 +172,6 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 			}
 			throw new SignupProfileException(SignupProfileFailure.PROFILE_ALREADY_COMPLETED);
 		}
-		validateFinalNickname(requestedNickname);
 		if (!requestedNickname.value().equals(user.getNickname())) {
 			if (!nicknameHoldPort.isHeldBy(requestedNickname, userId, Instant.now())) {
 				throw new SignupProfileException(SignupProfileFailure.HOLD_REQUIRED);
@@ -228,18 +225,7 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 		}
 	}
 
-	private void validateFinalNickname(Nickname nickname) {
-		if (nickname.value().startsWith("가입대기_")) {
-			throw new SignupProfileException(SignupProfileFailure.INVALID_NICKNAME);
-		}
-	}
-
 	private void validateNicknameChange(String userId, Nickname requestedNickname) {
-		if (requestedNickname.value().startsWith("가입대기_")) {
-			throw new UpdateProfileFailureException(
-					UpdateProfileFailureReason.INVALID_REQUEST,
-					"유효하지 않은 닉네임입니다.");
-		}
 		if (!nicknameHoldPort.isHeldBy(requestedNickname, userId, Instant.now())) {
 			throw new UpdateProfileFailureException(
 					UpdateProfileFailureReason.PROFILE_CONFLICT,

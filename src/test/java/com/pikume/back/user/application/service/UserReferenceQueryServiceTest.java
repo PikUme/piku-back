@@ -31,7 +31,7 @@ class UserReferenceQueryServiceTest {
 	@Test
 	@DisplayName("프로필 설정 전 회원은 다른 Context의 공개 참조 대상에서 제외한다")
 	void hidesPendingReference() {
-		User user = User.pending("pending@test.com", "pw", "가입대기_pending", 1L);
+		User user = User.pending("pending@test.com", "pw", "pending", 1L);
 		given(loadUserReferencePort.loadReference("pending")).willReturn(Optional.of(user));
 		var service = new UserReferenceQueryService(
 				loadUserReferencePort,

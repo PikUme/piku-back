@@ -20,7 +20,7 @@ class UserAccessPersistenceAdapterTest {
 	@DisplayName("비밀번호나 아바타 해석 없이 가입 대기 사용자의 접근 상태만 조회한다")
 	void queriesOnlyUserAccessState() {
 		User pendingUser = userJpaRepository.saveAndFlush(
-				User.pending("pending@example.com", null, "가입대기_access", 1L));
+				User.pending("pending@example.com", null, "pending", 1L));
 		UserAccessPersistenceAdapter adapter = new UserAccessPersistenceAdapter(userJpaRepository);
 
 		var result = adapter.queryUserAccess(pendingUser.getId()).orElseThrow();

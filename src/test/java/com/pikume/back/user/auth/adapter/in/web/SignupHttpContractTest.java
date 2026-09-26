@@ -168,7 +168,7 @@ class SignupHttpContractTest {
     }
     @Test void agreementCompletionUsesExistingWebSessionContract() throws Exception {
         given(flow.agree(any())).willReturn(new SignupProofResult(PROOF,new SignupProgress(SignupNextAction.PROFILE,"user@gmail.com","user","REQUIRED",Instant.now().plusSeconds(500))));
-        given(issue.issueSession("user","device")).willReturn(new LoginResult("access","refresh",new LoginResult.UserInfo("user","가입대기_a",new UserAvatarReference("base.webp",false,true),"REQUIRED")));
+        given(issue.issueSession("user","device")).willReturn(new LoginResult("access","refresh",new LoginResult.UserInfo("user","user",new UserAvatarReference("base.webp",false,true),"REQUIRED")));
         mvc.perform(post("/api/auth/signup/agreements").header("Origin","https://www.pikume.com").header("X-Signup-CSRF",CSRF).header("Device-Id","device")
             .cookie(cookies()).contentType(MediaType.APPLICATION_JSON).content("{\"agreements\":[{\"type\":\"TERMS\",\"version\":\"v1\",\"agreed\":true}]}"))
             .andExpect(status().isOk()).andExpect(header().string("Authorization","Bearer access"))

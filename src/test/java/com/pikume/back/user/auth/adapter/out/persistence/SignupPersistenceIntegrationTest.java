@@ -134,12 +134,11 @@ class SignupPersistenceIntegrationTest extends SignupPersistenceTestSupport {
   } finally {pool.shutdownNow();}
  }
 
-
  @Test void cleanupPurgesExpiredProofAndChallengeButPreservesAbandonedUser() {
   tx.required(() -> {
    store.saveProof(SignupAuthentication.email(SignupFlowService.hash("expired"),SignupFlowService.hash("caller"),"a@gmail.com","hash",Instant.now().minusSeconds(601)));
    store.saveChallenge(Verification.signupChallenge("expired-challenge","a@gmail.com","caller",Instant.now().minusSeconds(301),60));
-   store.createUser(User.pending("pending@gmail.com",null,"가입대기_keep",5L));return null;
+   store.createUser(User.pending("pending@gmail.com",null,"pending",5L));return null;
   });
   service.purgeExpiredSignupArtifacts();
   assertThat(count("SignupAuthentication")).isZero();assertThat(count("Verification")).isZero();assertThat(count("User")).isEqualTo(1);

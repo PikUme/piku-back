@@ -57,7 +57,7 @@ class SignupAccessSecurityIntegrationTest {
             .andExpect(status().isUnauthorized());
     }
     private String pending() {
-        given(identities.queryUserIdentityById("pending")).willReturn(Optional.of(new UserIdentityView("pending",null,"가입대기_a",null,"REQUIRED")));
+        given(identities.queryUserIdentityById("pending")).willReturn(Optional.of(new UserIdentityView("pending",null,"pending",null,"REQUIRED")));
         given(access.queryUserAccess("pending")).willReturn(Optional.of(new UserAccessView("pending",false,UserAccessProfileStatus.REQUIRED)));
         return "Bearer "+jwt.generateAccessToken("pending");
     }

@@ -19,8 +19,6 @@ import java.util.Objects;
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class User extends BaseEntity {
-	private static final String TEMPORARY_NICKNAME_PREFIX = "가입대기_";
-
 	@Id
 	@GeneratedValue(strategy = GenerationType.UUID)
 	@Column(length = 36)
@@ -65,8 +63,8 @@ public class User extends BaseEntity {
 		this.characterId = requireCharacterId(characterId);
 	}
 
-	public static User pending(String email, String passwordHash, String temporaryNickname, Long characterId) {
-		User user = new User(email, passwordHash, temporaryNickname, characterId);
+	public static User pending(String email, String passwordHash, String defaultNickname, Long characterId) {
+		User user = new User(email, passwordHash, defaultNickname, characterId);
 		user.profileSetupStatus = ProfileSetupStatus.REQUIRED;
 		return user;
 	}
@@ -81,7 +79,7 @@ public class User extends BaseEntity {
 	}
 
 	public void changeNickname(Nickname newNickname) {
-		this.nickname = requireFinalNickname(newNickname);
+		this.nickname = requireNickname(newNickname);
 	}
 
 	public void changeCharacter(Long characterId) {
@@ -108,19 +106,11 @@ public class User extends BaseEntity {
 			throw new IllegalStateException("이미 완료된 프로필은 완료 요청으로 변경할 수 없습니다.");
 		}
 
-		Nickname completedNickname = requireFinalNickname(nickname);
+		Nickname completedNickname = requireNickname(nickname);
 		Long completedCharacterId = requireCharacterId(characterId);
 		this.nickname = completedNickname;
 		this.characterId = completedCharacterId;
 		this.profileSetupStatus = ProfileSetupStatus.COMPLETED;
-	}
-
-	private Nickname requireFinalNickname(Nickname nickname) {
-		requireNickname(nickname);
-		if (nickname.value().startsWith(TEMPORARY_NICKNAME_PREFIX)) {
-			throw new InvalidNicknameException("가입 대기 닉네임은 최종 닉네임으로 사용할 수 없습니다.");
-		}
-		return nickname;
 	}
 
 	public String getEmail() {

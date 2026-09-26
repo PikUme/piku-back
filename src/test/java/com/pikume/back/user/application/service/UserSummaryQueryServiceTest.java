@@ -34,7 +34,7 @@ class UserSummaryQueryServiceTest {
 	@Test
 	@DisplayName("프로필 설정 전 회원만 조회하면 아바타를 해석하지 않고 빈 요약을 반환한다")
 	void hidesPendingSummaries() {
-		User pending = User.pending("pending@test.com", "pw", "가입대기_pending", 1L);
+		User pending = User.pending("pending@test.com", "pw", "pending", 1L);
 		given(loadUserReferencePort.loadReferences(Set.of("pending"))).willReturn(List.of(pending));
 		var service = new UserSummaryQueryService(
 				loadUserReferencePort,
@@ -48,7 +48,7 @@ class UserSummaryQueryServiceTest {
 	@DisplayName("혼합 목록에서는 완료 회원만 공개하고 프로필 완료 후 같은 회원을 포함한다")
 	void includesPendingUserOnlyAfterCompletion() {
 		User completed = new User("completed", "completed@test.com", "pw", "완료회원", 1L);
-		User pending = User.pending("pending@test.com", "pw", "가입대기_pending", 2L);
+		User pending = User.pending("pending@test.com", "pw", "pending", 2L);
 		ReflectionTestUtils.setField(pending, "id", "pending");
 		Set<String> ids = Set.of("completed", "pending");
 		given(loadUserReferencePort.loadReferences(ids)).willReturn(List.of(completed, pending));

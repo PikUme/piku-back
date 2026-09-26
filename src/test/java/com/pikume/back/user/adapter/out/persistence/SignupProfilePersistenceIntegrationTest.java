@@ -103,18 +103,20 @@ class SignupProfilePersistenceIntegrationTest {
 		assertThat(users.findById(user.getId()).orElseThrow().isProfileSetupRequired()).isTrue();
 	}
 
-	@Test void legacyPendingPrefixCannotBeConfirmedAsAnOwnedDefault() {
-		User user=users.saveAndFlush(User.pending("old@example.com",null,"가입대기_old",1L));
+	@Test void changedNicknameCannotCompleteWithoutReservation() {
+		User user=users.saveAndFlush(User.pending("member@example.com",null,"member",1L));
 
-		assertThatThrownBy(()->service.completeSignupProfile(user.getId(),"가입대기_old",1L))
-			.isInstanceOfSatisfying(SignupProfileException.class,e->assertThat(e.getFailure()).isEqualTo(SignupProfileFailure.INVALID_NICKNAME));
+		assertThatThrownBy(()->service.completeSignupProfile(user.getId(),"changed",1L))
+			.isInstanceOfSatisfying(SignupProfileException.class,e->assertThat(e.getFailure()).isEqualTo(SignupProfileFailure.HOLD_REQUIRED));
 
-		assertThat(users.findById(user.getId()).orElseThrow().isProfileSetupRequired()).isTrue();
+		User saved=users.findById(user.getId()).orElseThrow();
+		assertThat(saved.isProfileSetupRequired()).isTrue();
+		assertThat(saved.getNickname()).isEqualTo("member");
 	}
 
 	@Test void normalizedSignupHoldRejectsAnotherMemberAndSupportsCompletionRetry() {
-		User first=users.saveAndFlush(User.pending("first@example.com",null,"가입대기_first",1L));
-		User second=users.saveAndFlush(User.pending("second@example.com",null,"가입대기_second",1L));
+		User first=users.saveAndFlush(User.pending("first@example.com",null,"first",1L));
+		User second=users.saveAndFlush(User.pending("second@example.com",null,"second",1L));
 		var reserved=service.reserveSignupNickname(first.getId(),"  완료닉　 ");
 		assertThat(reserved.nickname()).isEqualTo("완료닉");
 		assertThat(jdbc.queryForObject("SELECT nickname FROM nickname_holds",String.class)).isEqualTo("완료닉");
@@ -129,7 +131,7 @@ class SignupProfilePersistenceIntegrationTest {
 	}
 
 	@Test void failedCharacterSelectionKeepsHoldAndPendingAccountThenRetryCompletes() {
-		User user = users.saveAndFlush(User.pending("user@example.com", null, "가입대기_123", 1L));
+		User user = users.saveAndFlush(User.pending("user@example.com", null, "user", 1L));
 		var reservation = service.reserveSignupNickname(user.getId(), "final");
 
 		assertThatThrownBy(() -> service.completeSignupProfile(user.getId(), "final", 9L))
@@ -146,7 +148,7 @@ class SignupProfilePersistenceIntegrationTest {
 	}
 
 	@Test void persistenceFailureRollsBackProfileAndPreservesReservation() {
-		User user = users.saveAndFlush(User.pending("rollback@example.com", null, "가입대기_rollback", 1L));
+		User user = users.saveAndFlush(User.pending("rollback@example.com", null, "rollback", 1L));
 		service.reserveSignupNickname(user.getId(), "final");
 		given(characters.resolveFixedCharacterObjectKey(1L)).willReturn(Optional.of("default.webp"));
 		doAnswer(invocation -> { invocation.callRealMethod(); throw new IllegalStateException("storage failure"); })
@@ -159,7 +161,7 @@ class SignupProfilePersistenceIntegrationTest {
 	}
 
 	@Test void simultaneousIdenticalCompletionCommitsOnceAndBothRequestsSucceed() throws Exception {
-		User user = users.saveAndFlush(User.pending("concurrent@example.com", null, "가입대기_concurrent", 1L));
+		User user = users.saveAndFlush(User.pending("concurrent@example.com", null, "concurrent", 1L));
 		service.reserveSignupNickname(user.getId(), "final");
 		given(characters.resolveFixedCharacterObjectKey(1L)).willReturn(Optional.of("default.webp"));
 		ExecutorService executor = Executors.newFixedThreadPool(2);
@@ -182,7 +184,7 @@ class SignupProfilePersistenceIntegrationTest {
 	@ParameterizedTest(name = "비밀번호 재설정과 가입 상태 변경 경합: 탈퇴={0}")
 	@ValueSource(booleans = {false, true})
 	void passwordResetPreservesConcurrentSignupCompletionOrWithdrawal(boolean withdraw) throws Exception {
-		User user = users.saveAndFlush(User.pending("reset@example.com", "old-hash", "가입대기_reset", 1L));
+		User user = users.saveAndFlush(User.pending("reset@example.com", "old-hash", "reset", 1L));
 		if (!withdraw) {
 			service.reserveSignupNickname(user.getId(), "final");
 			given(characters.resolveFixedCharacterObjectKey(2L)).willReturn(Optional.of("selected.webp"));

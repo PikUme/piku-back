@@ -72,8 +72,7 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 			throw new AuthException(AuthErrorCode.EMAIL_ALREADY_EXISTS);
 		}
 
-        if (nickname.value().startsWith("가입대기_")
-                || checkUserUniquenessPort.isNicknameInUse(nickname)
+        if (checkUserUniquenessPort.isNicknameInUse(nickname)
                 || nicknameHoldPort.isHeld(nickname, Instant.now())) {
             throw new AuthException(AuthErrorCode.NICKNAME_ALREADY_EXISTS);
         }
