@@ -8,7 +8,6 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -36,7 +35,6 @@ import com.pikume.back.user.adapter.in.web.problem.UserProblemType;
 
 @Tag(name = "Users", description = "유저 관련 API")
 @RestController
-@Slf4j
 @RequestMapping("/api/users")
 @RequiredArgsConstructor
 public class UserController {
@@ -52,7 +50,6 @@ public class UserController {
 	public ResponseEntity<ProfilePreviewResponse> queryProfilePreview(
 			@PathVariable String userId,
 			@AuthenticationPrincipal UserPrincipal userDetails) {
-		log.info("event=profile_preview_requested outcome=accepted userId={}", userId);
 
 		String loginUserId = userDetails != null ? userDetails.getId() : null;
 		ProfilePreviewResult result = queryUserProfileUseCase.queryProfilePreview(userId, loginUserId);

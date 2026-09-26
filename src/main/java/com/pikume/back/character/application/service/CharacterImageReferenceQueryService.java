@@ -89,8 +89,8 @@ public class CharacterImageReferenceQueryService implements QueryCharacterImageR
 							isAbsoluteUrl(objectKey),
 							!isAbsoluteUrl(objectKey)));
 		} catch (IllegalArgumentException exception) {
-			log.warn("잘못된 fixed character image reference입니다. characterId={} reason={}",
-					character.getId(), exception.getMessage());
+			log.warn("event=fixed_character_reference_invalid outcome=skipped resourceId={} exception={}",
+					character.getId(), exception.getClass().getSimpleName());
 			return Optional.empty();
 		}
 	}

@@ -7,7 +7,6 @@ import com.pikume.back.admin.domain.exception.AdminDomainException;
 import com.pikume.back.global.error.ProblemDetailFactory;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -16,7 +15,6 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice(basePackages = "com.pikume.back.admin.adapter.in.web")
 @RequiredArgsConstructor
-@Slf4j
 public class AdminExceptionHandler {
 
 	private final ProblemDetailFactory problemDetailFactory;
@@ -49,8 +47,6 @@ public class AdminExceptionHandler {
 	public ResponseEntity<ProblemDetail> handleStoreUnavailable(
 			AdminAuthenticationStoreException exception, HttpServletRequest request) {
 		recordAdminSecurityEventUseCase.recordSessionStoreUnavailable();
-		log.error("event=admin_store_unavailable outcome=failed exception={}",
-				exception.getClass().getSimpleName());
 		ProblemDetail problemDetail = problemDetailFactory.create(
 				AdminProblemType.SESSION_STORE_UNAVAILABLE,
 				"관리자 인증 저장소를 확인할 수 없습니다.",

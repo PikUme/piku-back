@@ -34,6 +34,6 @@ public class AdminStatisticsAggregationService implements AdminStatisticsAggrega
 		Map<LocalDate, AdminDailyStatisticsResult> calculated = adminDailyStatisticsCalculator.calculate(date, date);
 		AdminDailyStatisticsResult result = calculated.getOrDefault(date, AdminDailyStatisticsResult.zero(date));
 		recordAdminDailyStatisticsPort.recordDailyStatistics(result.toEntity(LocalDateTime.now(STATISTICS_ZONE)));
-		log.info("event=admin_daily_statistics_aggregated date={}", date);
+		log.info("event=admin_daily_statistics_aggregated outcome=success date={}", date);
 	}
 }

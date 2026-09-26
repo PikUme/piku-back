@@ -50,7 +50,7 @@ public class InquiryService implements SubmitInquiryUseCase {
 			throw new SupportException(SupportErrorCode.INVALID_INQUIRY, exception);
 		}
 		recordInquiryPort.recordInquiry(inquiry);
-		log.info("event=inquiry_recorded userId={}", command.userId());
+		log.info("event=inquiry_recorded outcome=success userId={}", command.userId());
 	}
 
 	private String storeAttachment(InquiryAttachment attachment, String userId) {

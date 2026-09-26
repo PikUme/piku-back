@@ -41,7 +41,7 @@ public class InMemoryNotificationStreamAdapter implements
 		}
 		userConnections.forEach((emitterId, connection) -> {
 			try {
-				log.info("event=sse_notification_send_requested outcome=accepted userId={} resourceId={}",
+				log.debug("event=sse_notification_send_requested outcome=accepted userId={} resourceId={}",
 						userId, emitterId);
 				connection.send(message);
 			} catch (NotificationStreamSendException e) {

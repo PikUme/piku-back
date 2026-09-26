@@ -49,7 +49,7 @@ public class UsableCharacterReferenceService implements ResolveUsableCharacterRe
 		try {
 			return CharacterImageReference.of(storedReference).toUsableObjectKey();
 		} catch (IllegalArgumentException exception) {
-			log.warn("사용할 수 없는 캐릭터 이미지 참조입니다. characterId={} reason={}",
+			log.warn("event=character_image_reference_unavailable outcome=skipped resourceId={} exception={}",
 					characterId,
 					exception.getClass().getSimpleName());
 			return Optional.empty();
@@ -62,7 +62,7 @@ public class UsableCharacterReferenceService implements ResolveUsableCharacterRe
 					.canonicalizeFixedCharacterObjectKey(storedReference);
 			return CharacterImageReference.of(normalized).toUsableObjectKey();
 		} catch (IllegalArgumentException exception) {
-			log.warn("사용할 수 없는 캐릭터 이미지 참조입니다. characterId={} reason={}",
+			log.warn("event=character_image_reference_unavailable outcome=skipped resourceId={} exception={}",
 					characterId,
 					exception.getClass().getSimpleName());
 			return Optional.empty();

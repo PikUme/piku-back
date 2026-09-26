@@ -75,7 +75,7 @@ public class FriendController {
 	public ResponseEntity<OffsetPageResponse<FriendsDTO>> findFriendList(
 			@ParameterObject @PageableDefault(sort = "userId1", direction = Sort.Direction.DESC) Pageable pageable,
 			@AuthenticationPrincipal UserPrincipal userPrincipal) {
-		log.info("{} 의 친구 목록 조회 요청", userPrincipal.getId());
+		log.debug("event=friend_list_requested userId={}", userPrincipal.getId());
 
 		PageQuery pageQuery = SpringPageMapper.toPageQuery(pageable);
 		PageResult<FriendsDTO> friendResults = queryFriendPageUseCase.queryFriendPage(pageQuery, userPrincipal.getId())
@@ -93,7 +93,7 @@ public class FriendController {
 	public ResponseEntity<OffsetPageResponse<FriendsDTO>> findFriendRequests(
 			@ParameterObject @PageableDefault Pageable pageable,
 			@AuthenticationPrincipal UserPrincipal userPrincipal) {
-		log.info("{} 의 받은 친구 요청 목록 조회", userPrincipal.getId());
+		log.debug("event=received_friend_requests_requested userId={}", userPrincipal.getId());
 
 		PageQuery pageQuery = SpringPageMapper.toPageQuery(pageable);
 		PageResult<FriendsDTO> requestResults = queryFriendPageUseCase
@@ -112,8 +112,9 @@ public class FriendController {
 	public ResponseEntity<FriendRequestResponseDto> rejectFriendRequest(
 			@AuthenticationPrincipal UserPrincipal userPrincipal,
 			@PathVariable String fromUserId) {
-		log.info("{} 가 {} 의 친구 요청 거절", userPrincipal.getId(), fromUserId);
 		FriendRequestResult response = rejectFriendRequestUseCase.rejectFriendRequest(userPrincipal.getId(), fromUserId);
+		log.info("event=friend_request_rejected outcome=success userId={} targetUserId={}",
+				userPrincipal.getId(), fromUserId);
 		return ResponseEntity.ok(toResponseDto(response));
 	}
 
@@ -125,8 +126,9 @@ public class FriendController {
 	public ResponseEntity<FriendRequestResponseDto> cancelFriendRequest(
 			@AuthenticationPrincipal UserPrincipal userPrincipal,
 			@PathVariable String toUserId) {
-		log.info("{} 가 {} 에게 보낸 친구 요청 취소", userPrincipal.getId(), toUserId);
 		FriendRequestResult response = cancelFriendRequestUseCase.cancelFriendRequest(userPrincipal.getId(), toUserId);
+		log.info("event=friend_request_cancelled outcome=success userId={} targetUserId={}",
+				userPrincipal.getId(), toUserId);
 		return ResponseEntity.ok(toResponseDto(response));
 	}
 
@@ -140,8 +142,8 @@ public class FriendController {
 			@PathVariable String toUserId) {
 
 		String fromUserId = userPrincipal.getId();
-		log.info("User {} is unfriending user {}", fromUserId, toUserId);
 		FriendRemovalResult response = removeFriendshipUseCase.removeFriend(fromUserId, toUserId);
+		log.info("event=friendship_removed outcome=success userId={} targetUserId={}", fromUserId, toUserId);
 		return ResponseEntity.ok(toRemoveDto(response));
 	}
 

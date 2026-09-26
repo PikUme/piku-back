@@ -116,7 +116,7 @@ public class DiaryPhotoRelocationService {
 			try {
 				photoRelocationPort.delete(objectKey);
 			} catch (RuntimeException exception) {
-				log.error("event={} objectKey={} reason={}", event, objectKey, exception.getMessage(), exception);
+				log.error("event={} outcome=failed exception={}", event, exception.getClass().getSimpleName());
 			}
 		}
 	}

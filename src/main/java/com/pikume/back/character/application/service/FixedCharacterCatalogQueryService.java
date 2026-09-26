@@ -61,9 +61,8 @@ public class FixedCharacterCatalogQueryService implements QueryFixedCharacterCat
 					objectKey,
 					character.getType()));
 		} catch (IllegalArgumentException exception) {
-			log.warn("잘못된 fixed character image reference를 건너뜁니다. reference={} reason={}",
-					character.getImageReference(),
-					exception.getMessage());
+			log.warn("event=fixed_character_reference_invalid outcome=skipped resourceId={} exception={}",
+					character.getId(), exception.getClass().getSimpleName());
 			return Optional.empty();
 		}
 	}

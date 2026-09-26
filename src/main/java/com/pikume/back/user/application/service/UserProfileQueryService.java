@@ -44,7 +44,7 @@ public class UserProfileQueryService implements QueryUserProfileUseCase {
 		UserAvatarReference avatarReference = userAvatarReferenceResolver.resolveRequired(List.of(selection))
 				.get(selection);
 
-		log.info("event=profile_preview_loaded outcome=success userId={} friendCount={} diaryCount={} friendStatus={}",
+		log.debug("event=profile_preview_loaded outcome=success userId={} friendCount={} diaryCount={} friendStatus={}",
 				profileId, friendCount, diaryCount, friendshipStatus);
 
 		return new ProfilePreviewResult(profileId, profile.getNickname(), avatarReference, friendCount, diaryCount,

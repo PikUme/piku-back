@@ -39,7 +39,7 @@ public class NotificationRecordingService implements RecordNotificationUseCase {
 	public void recordNotification(RecordNotificationCommand command) {
 		NotificationDiaryContextView diaryContext = loadDiaryContext(command.diaryId());
 		if (command.diaryId() != null && diaryContext == null) {
-			log.info("event=notification_record_skipped outcome=skipped reason=diary_missing diaryId={}",
+			log.debug("event=notification_record_skipped outcome=skipped reason=diary_missing diaryId={}",
 					command.diaryId());
 			return;
 		}

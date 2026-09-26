@@ -12,6 +12,6 @@ public class LocalPushAdapter implements DeliverPushNotificationPort {
 
 	@Override
 	public void deliverPushNotification(String targetToken, String body) {
-		log.info("[Local] Firebase 알림 전송(가정): {}", body);
+		log.debug("event=local_push_delivery outcome=skipped reason=non_production");
 	}
 }

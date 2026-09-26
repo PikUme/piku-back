@@ -23,12 +23,12 @@ public class NotificationStreamSubscriptionService implements SubscribeNotificat
 
 	@Override
 	public void subscribeToNotifications(String userId, NotificationStreamConnection connection) {
-		log.info("event=sse_subscription_requested outcome=accepted userId={}", userId);
+		log.debug("event=sse_subscription_requested outcome=accepted userId={}", userId);
 		String emitterId = userId + "_" + System.currentTimeMillis();
 		registerNotificationStreamPort.registerNotificationStream(emitterId, userId, connection);
 
 		connection.onCompletion(() -> {
-			log.info("event=sse_connection_completed outcome=success userId={} resourceId={}",
+			log.debug("event=sse_connection_completed outcome=success userId={} resourceId={}",
 					userId, emitterId);
 			closeNotificationStreamPort.closeNotificationStream(userId, emitterId);
 		});
@@ -55,7 +55,7 @@ public class NotificationStreamSubscriptionService implements SubscribeNotificat
 
 		if (summary.hasFriendRequest()) {
 			String friendEventId = userId + "_" + System.currentTimeMillis();
-			log.info("event=sse_friend_request_notification_send_requested outcome=accepted "
+			log.debug("event=sse_friend_request_notification_send_requested outcome=accepted "
 					+ "userId={} resourceId={}", userId, friendEventId);
 			send(userId, emitterId, connection,
 					new NotificationStreamMessage(friendEventId, "FriendRequest", "on"));

@@ -1,7 +1,6 @@
 package com.pikume.back.feed.application.service;
 
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.pikume.back.feed.application.dto.FeedDiaryResult;
@@ -21,7 +20,6 @@ import java.util.Map;
 import java.util.Set;
 
 @Service
-@Slf4j
 @RequiredArgsConstructor
 public class FeedDetailQueryService implements QueryFeedDetailUseCase {
 
@@ -33,8 +31,6 @@ public class FeedDetailQueryService implements QueryFeedDetailUseCase {
 	@Override
 	@Transactional(readOnly = true)
 	public FeedDiaryResult queryDetail(Long diaryId, String viewerId) {
-		log.info("일기 상세 조회 요청 - diaryId: {}", diaryId);
-
 		FeedDiaryDetailView diary = loadFeedDiaryDetailPort.loadVisibleDiary(diaryId, viewerId)
 				.orElseThrow(FeedDiaryNotFoundException::new);
 		FeedAuthorView author = loadAuthor(diary);

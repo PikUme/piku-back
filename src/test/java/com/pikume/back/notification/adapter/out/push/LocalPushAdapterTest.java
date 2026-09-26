@@ -1,5 +1,6 @@
 package com.pikume.back.notification.adapter.out.push;
 
+import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -15,19 +16,24 @@ class LocalPushAdapterTest {
 	private final LocalPushAdapter localPushAdapter = new LocalPushAdapter();
 
 	@Test
-	@DisplayName("비운영 환경에서는 Push 전달 요청만 기록한다")
+	@DisplayName("비운영 Push 로그는 DEBUG로 남기며 토큰과 알림 본문을 노출하지 않는다")
 	void logsLocalPushDelivery() {
+		Logger logger = (Logger) LoggerFactory.getLogger(LocalPushAdapter.class);
+		Level previousLevel = logger.getLevel();
+		logger.setLevel(Level.DEBUG);
 		ListAppender<ILoggingEvent> appender = attachLogAppender();
 
 		try {
 			localPushAdapter.deliverPushNotification("target-token", "알림 본문");
 		} finally {
 			detachLogAppender(appender);
+			logger.setLevel(previousLevel);
 		}
 
+		assertThat(appender.list).singleElement().satisfies(event ->
+				assertThat(event.getLevel()).isEqualTo(Level.DEBUG));
 		assertThat(formattedMessages(appender))
-				.anyMatch(message -> message.contains("알림 본문"))
-				.noneMatch(message -> message.contains("target-token"));
+				.noneMatch(message -> message.contains("알림 본문") || message.contains("target-token"));
 	}
 
 	private ListAppender<ILoggingEvent> attachLogAppender() {

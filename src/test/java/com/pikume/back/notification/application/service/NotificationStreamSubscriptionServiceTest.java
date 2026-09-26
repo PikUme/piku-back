@@ -194,11 +194,14 @@ class NotificationStreamSubscriptionServiceTest {
 	class Logging {
 
 		@Test
-		@DisplayName("정상 구독 흐름을 구조화된 INFO 로그로 기록한다")
-		void subscribeLogsStructuredNormalFlowAtInfo() {
+		@DisplayName("정상 구독 흐름을 구조화된 DEBUG 로그로 기록한다")
+		void subscribeLogsStructuredNormalFlowAtDebug() {
 			given(loadNotificationSummaryPort.loadNotificationSummary("user-id"))
 					.willReturn(new NotificationSummaryView(1L, true));
 			ArgumentCaptor<Runnable> completionHandlerCaptor = ArgumentCaptor.forClass(Runnable.class);
+			Logger logger = (Logger) LoggerFactory.getLogger(NotificationStreamSubscriptionService.class);
+			Level previousLevel = logger.getLevel();
+			logger.setLevel(Level.DEBUG);
 			ListAppender<ILoggingEvent> appender = attachLogAppender();
 
 			try {
@@ -207,18 +210,19 @@ class NotificationStreamSubscriptionServiceTest {
 				completionHandlerCaptor.getValue().run();
 			} finally {
 				detachLogAppender(appender);
+				logger.setLevel(previousLevel);
 			}
 
-			assertLogContains(appender, Level.INFO,
+			assertLogContains(appender, Level.DEBUG,
 					"event=sse_subscription_requested",
 					"outcome=accepted",
 					"userId=user-id");
-			assertLogContains(appender, Level.INFO,
+			assertLogContains(appender, Level.DEBUG,
 					"event=sse_friend_request_notification_send_requested",
 					"outcome=accepted",
 					"userId=user-id",
 					"resourceId=user-id_");
-			assertLogContains(appender, Level.INFO,
+			assertLogContains(appender, Level.DEBUG,
 					"event=sse_connection_completed",
 					"outcome=success",
 					"userId=user-id",

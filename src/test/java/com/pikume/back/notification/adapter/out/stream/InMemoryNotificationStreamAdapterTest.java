@@ -42,22 +42,26 @@ class InMemoryNotificationStreamAdapterTest {
 	}
 
 	@Test
-	@DisplayName("알림 전송 요청을 구조화된 INFO 로그로 기록한다")
-	void sendToUserLogsStructuredSendRequestAtInfo() {
+	@DisplayName("알림 전송 요청을 구조화된 DEBUG 로그로 기록한다")
+	void sendToUserLogsStructuredSendRequestAtDebug() {
 		InMemoryNotificationStreamAdapter adapter = new InMemoryNotificationStreamAdapter();
 		NotificationStreamConnection connection = mock(NotificationStreamConnection.class);
 		NotificationStreamMessage message = new NotificationStreamMessage("event-id", null, "data");
 		adapter.registerNotificationStream("emitter-id", "user-id", connection);
+		Logger logger = (Logger) LoggerFactory.getLogger(InMemoryNotificationStreamAdapter.class);
+		Level previousLevel = logger.getLevel();
+		logger.setLevel(Level.DEBUG);
 		ListAppender<ILoggingEvent> appender = attachLogAppender();
 
 		try {
 			adapter.deliverNotificationStream("user-id", message);
 		} finally {
 			detachLogAppender(appender);
+			logger.setLevel(previousLevel);
 		}
 
 		assertThat(appender.list).anySatisfy(event -> {
-			assertThat(event.getLevel()).isEqualTo(Level.INFO);
+			assertThat(event.getLevel()).isEqualTo(Level.DEBUG);
 			assertThat(event.getFormattedMessage()).contains(
 					"event=sse_notification_send_requested",
 					"outcome=accepted",

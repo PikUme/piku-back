@@ -43,7 +43,7 @@ public class DiaryMetadataService implements AnalyzeDiaryContentUseCase, QueryDi
 					topicScores,
 					analysis.qualityScore(),
 					recommendationClockPort.now());
-			log.debug("일기 메타데이터 업데이트 - diaryId: {}, topic: {}", diaryId, analysis.primaryTopic());
+			log.debug("event=diary_metadata_updated outcome=success resourceId={}", diaryId);
 		} else {
 			DiaryMetadata metadata = DiaryMetadata.create(
 					diaryId,
@@ -51,8 +51,8 @@ public class DiaryMetadataService implements AnalyzeDiaryContentUseCase, QueryDi
 					topicScores,
 					analysis.qualityScore(),
 					recommendationClockPort.now());
-			log.debug("일기 메타데이터 신규 저장 - diaryId: {}, topic: {}", diaryId, analysis.primaryTopic());
 			recordDiaryMetadataPort.recordDiaryMetadata(metadata);
+			log.debug("event=diary_metadata_created outcome=success resourceId={}", diaryId);
 		}
 	}
 

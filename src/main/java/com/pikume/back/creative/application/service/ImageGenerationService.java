@@ -43,7 +43,7 @@ public class ImageGenerationService implements GenerateImageUseCase {
 	public GeneratedImageResult generateDiaryImage(GenerateDiaryImageCommand command) {
 		String content = command.content();
 		String userId = command.userId();
-		log.info("사용자 ID '{}' 일기 이미지 생성 요청", userId);
+		log.debug("event=diary_image_generation_requested userId={}", userId);
 		recordAiPhotoStatisticsUseCase.recordRequest(userId);
 
 		AiGenerationQuotaConsumption consumption = consumeAiGenerationQuotaUseCase.tryConsumeForGeneration(userId);
@@ -60,7 +60,6 @@ public class ImageGenerationService implements GenerateImageUseCase {
 							CreativeErrorCode.CHARACTER_REFERENCE_UNAVAILABLE));
 
 			String prompt = diaryIllustrationPromptPolicy.createPrompt(content);
-			log.info("AI 일기 이미지 프롬프트 준비 완료");
 
 			GeneratedIllustrationPayload illustration = generateDiaryIllustrationPort.generate(
 					new DiaryIllustrationRequest(prompt, characterImageBase64));
@@ -72,7 +71,8 @@ public class ImageGenerationService implements GenerateImageUseCase {
 			String aiUrl = creativeImageStoragePort.resolveGeneratedImageUrl(generatedImageRelativePath, false);
 			DiaryImageGeneration diaryImageGeneration = recordGenerationPort.recordGeneration(
 					DiaryImageGeneration.create(userId, prompt, generatedImageRelativePath));
-			log.info("AI 일기 이미지 생성 완료");
+			log.info("event=diary_image_generated outcome=success userId={} resourceId={}",
+					userId, diaryImageGeneration.getId());
 			result = new GeneratedImageResult(diaryImageGeneration.getId(), aiUrl, generatedImageRelativePath);
 		} catch (RuntimeException e) {
 			releaseConsumptionSafely(userId, e);
@@ -88,7 +88,7 @@ public class ImageGenerationService implements GenerateImageUseCase {
 		try {
 			consumeAiGenerationQuotaUseCase.releaseGenerationConsumption(userId);
 		} catch (RuntimeException releaseFailure) {
-			log.warn("event=ai_generation_quota_release_failed userId={} originalFailure={} releaseFailure={}",
+			log.warn("event=ai_generation_quota_release_failed outcome=failed userId={} originalFailure={} releaseFailure={}",
 					userId,
 					cause.getClass().getSimpleName(),
 					releaseFailure.getClass().getSimpleName());

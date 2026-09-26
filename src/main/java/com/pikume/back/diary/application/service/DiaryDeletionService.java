@@ -32,10 +32,9 @@ public class DiaryDeletionService implements DeleteDiaryUseCase {
 		transactionCompletionPort.runAfterCommit(
 				() -> notificationPort.deleteNotificationsByDiaryId(diaryId),
 				exception -> log.warn(
-						"event=diary_notification_cleanup_failed diaryId={} reason={}",
+						"event=diary_notification_cleanup_failed outcome=failed resourceId={} exception={}",
 						diaryId,
-						exception.getMessage(),
-						exception));
+						exception.getClass().getSimpleName()));
 	}
 
 	private Diary loadOwnedDiary(Long diaryId, String userId) {

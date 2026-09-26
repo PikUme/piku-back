@@ -33,7 +33,7 @@ public class FirebaseConfig {
             }
 
         } catch (Exception e) {
-            log.error("Firebase initialization error : {}", e.getMessage());
+            log.error("event=firebase_initialization_failed outcome=failed exception={}", e.getClass().getSimpleName());
             throw new RuntimeException("Firebase initialization error", e);
         }
     }

@@ -42,10 +42,9 @@ public class DiaryUpdateService implements UpdateDiaryUseCase {
 			transactionCompletionPort.runAfterCommit(
 					() -> analysisPort.analyze(recorded.getId(), recorded.getContent()),
 					exception -> log.warn(
-							"event=diary_content_analysis_failed diaryId={} reason={}",
+							"event=diary_content_analysis_failed outcome=failed resourceId={} exception={}",
 							recorded.getId(),
-							exception.getMessage(),
-							exception));
+							exception.getClass().getSimpleName()));
 			return new DiaryUpdatedResult(recorded.getId(), recorded.getStatus(), recorded.getContent());
 		} catch (RuntimeException exception) {
 			relocationService.rollback(relocation);

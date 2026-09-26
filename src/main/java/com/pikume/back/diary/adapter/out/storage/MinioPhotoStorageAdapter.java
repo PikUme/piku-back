@@ -88,10 +88,6 @@ public class MinioPhotoStorageAdapter implements StoreDiaryPhotoPort, RelocateDi
 			if (e.statusCode() == 404) {
 				throw new RuntimeException("스토리지 객체를 찾을 수 없습니다: " + objectKey, e);
 			}
-			log.warn("event=storage_object_load_failed outcome=failed key={} status={} reason={}",
-					objectKey,
-					e.statusCode(),
-					e.awsErrorDetails() != null ? e.awsErrorDetails().errorMessage() : e.getMessage());
 			throw new RuntimeException("스토리지 객체를 읽는 중 오류가 발생했습니다.", e);
 		}
 	}
@@ -125,13 +121,12 @@ public class MinioPhotoStorageAdapter implements StoreDiaryPhotoPort, RelocateDi
 			s3Client.headBucket(headBucketRequest);
 		} catch (S3Exception e) {
 			if (e.statusCode() == 404) {
-				log.warn("버킷이 존재하지 않아 새로 생성합니다: {}", bucketName);
 				CreateBucketRequest createBucketRequest = CreateBucketRequest.builder()
 						.bucket(bucketName)
 						.build();
 				s3Client.createBucket(createBucketRequest);
+				log.info("event=storage_bucket_created outcome=success");
 			} else {
-				log.error("버킷 확인 중 오류 발생: {} - {}", e.statusCode(), e.awsErrorDetails().errorMessage());
 				throw e;
 			}
 		}
@@ -181,7 +176,8 @@ public class MinioPhotoStorageAdapter implements StoreDiaryPhotoPort, RelocateDi
 			try {
 				return getMinIOStoragePhotoUrl(objectName, publicObject);
 			} catch (Exception e) {
-				log.error("MinIO에서 미리 서명된 URL 생성 실패: {}", e.getMessage(), e);
+				log.error("event=storage_photo_url_resolution_failed outcome=failed provider=minio exception={}",
+						e.getClass().getSimpleName());
 				return null;
 			}
 		}
@@ -202,7 +198,8 @@ public class MinioPhotoStorageAdapter implements StoreDiaryPhotoPort, RelocateDi
 
 			return presigner.presignGetObject(presignRequest).url().toString();
 		} catch (Exception e) {
-			log.error("미리 서명된 URL 생성에 실패했습니다. Object: {}", objectName, e);
+			log.error("event=storage_photo_url_resolution_failed outcome=failed provider=s3 exception={}",
+					e.getClass().getSimpleName());
 			return null;
 		}
 	}
@@ -234,14 +231,12 @@ public class MinioPhotoStorageAdapter implements StoreDiaryPhotoPort, RelocateDi
 
 			s3Client.putObject(putObjectRequest, RequestBody.fromBytes(imageBytes));
 
-			log.info("Base64 이미지 저장 완료 - 사용자: {}, objectKey: {}, 크기: {} bytes", userId, objectName, imageBytes.length);
+			log.debug("event=generated_image_stored outcome=success userId={} sizeBytes={}", userId, imageBytes.length);
 			return objectName;
 
 		} catch (IllegalArgumentException e) {
-			log.error("Base64 디코딩 실패 - 사용자: {}, 오류: {}", userId, e.getMessage());
 			throw new RuntimeException("Base64 데이터가 올바르지 않습니다.", e);
 		} catch (Exception e) {
-			log.error("AI 이미지 저장 중 예상하지 못한 오류 발생: {}", e.getMessage(), e);
 			throw new RuntimeException("AI 이미지 저장 중 오류가 발생했습니다.", e);
 		}
 	}
@@ -278,12 +273,12 @@ public class MinioPhotoStorageAdapter implements StoreDiaryPhotoPort, RelocateDi
 
 		try {
 			if (sourceKey.equals(targetKey)) {
-				log.info("이미 대상 경로입니다: {}", sourceKey);
+				log.debug("event=storage_object_copy outcome=skipped reason=same_key");
 				return sourceKey;
 			}
 
 			if (objectHead(targetKey).isPresent()) {
-				log.info("대상 경로에 이미 파일이 존재합니다. sourceKey: {}, targetKey: {}", sourceKey, targetKey);
+				log.debug("event=storage_object_copy outcome=skipped reason=target_exists");
 				if (deleteSource) {
 					deleteObject(sourceKey);
 				}
@@ -292,7 +287,6 @@ public class MinioPhotoStorageAdapter implements StoreDiaryPhotoPort, RelocateDi
 
 			HeadObjectResponse sourceHead = objectHead(sourceKey)
 					.orElseThrow(() -> {
-						log.error("소스 파일이 존재하지 않습니다: {}", sourceKey);
 						return new RuntimeException("소스 파일을 찾을 수 없습니다: " + sourceKey);
 					});
 
@@ -322,37 +316,35 @@ public class MinioPhotoStorageAdapter implements StoreDiaryPhotoPort, RelocateDi
 				deleteObject(sourceKey);
 			}
 
-			log.info("파일 복제 완료: {} → {} (원본 삭제 여부: {})", sourceKey, targetKey, deleteSource);
+			log.debug("event=storage_object_copied outcome=success sourceDeleted={}", deleteSource);
 			return targetKey;
 
 		} catch (S3Exception e) {
-			log.error("S3 파일 복제 실패: {} → {}, 오류: {}", sourceKey, targetKey, e.getMessage(), e);
-
 			if (fileCopied) {
 				try {
 					if (!objectExists(targetKey)) {
 						throw new RuntimeException("복사된 파일을 확인할 수 없습니다: " + targetKey);
 					}
 					deleteObject(targetKey);
-					log.info("롤백: 복사된 파일 삭제 완료: {}", targetKey);
+					log.debug("event=storage_object_copy_rollback outcome=success");
 				} catch (Exception rollbackException) {
-					log.error("롤백 실패: {}", rollbackException.getMessage());
+					log.error("event=storage_object_copy_rollback outcome=failed exception={}",
+							rollbackException.getClass().getSimpleName());
 				}
 			}
 
 			throw new RuntimeException("파일 복제 중 오류가 발생했습니다.", e);
 		} catch (Exception e) {
-			log.error("파일 복제 중 예상하지 못한 오류 발생: {}", e.getMessage(), e);
-
 			if (fileCopied) {
 				try {
 					if (!objectExists(targetKey)) {
 						throw new RuntimeException("복사된 파일을 확인할 수 없습니다: " + targetKey);
 					}
 					deleteObject(targetKey);
-					log.info("롤백: 복사된 파일 삭제 완료: {}", targetKey);
+					log.debug("event=storage_object_copy_rollback outcome=success");
 				} catch (Exception rollbackException) {
-					log.error("롤백 실패: {}", rollbackException.getMessage());
+					log.error("event=storage_object_copy_rollback outcome=failed exception={}",
+							rollbackException.getClass().getSimpleName());
 				}
 			}
 
@@ -386,10 +378,6 @@ public class MinioPhotoStorageAdapter implements StoreDiaryPhotoPort, RelocateDi
 			if (e.statusCode() == 404) {
 				return Optional.empty();
 			}
-			log.warn("event=storage_object_exists_failed outcome=failed key={} status={} reason={}",
-					key,
-					e.statusCode(),
-					e.awsErrorDetails() != null ? e.awsErrorDetails().errorMessage() : e.getMessage());
 			throw e;
 		}
 	}
@@ -410,9 +398,8 @@ public class MinioPhotoStorageAdapter implements StoreDiaryPhotoPort, RelocateDi
 					.build();
 
 			s3Client.deleteObject(request);
-			log.info("파일 삭제 완료: {}", key);
+			log.debug("event=storage_object_deleted outcome=success");
 		} catch (S3Exception e) {
-			log.error("S3 파일 삭제 실패: {}, 오류: {}", key, e.getMessage(), e);
 			throw e;
 		}
 	}

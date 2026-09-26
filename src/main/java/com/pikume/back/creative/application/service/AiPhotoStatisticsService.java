@@ -32,10 +32,10 @@ public class AiPhotoStatisticsService implements RecordAiPhotoStatisticsUseCase 
 		try {
 			recorder.run();
 		} catch (RuntimeException e) {
-			log.warn("event=ai_photo_statistics_record_failed eventType={} userId={} reason={}",
+			log.warn("event=ai_photo_statistics_record_failed outcome=failed eventType={} userId={} exception={}",
 					eventType,
 					userId,
-					e.getMessage());
+					e.getClass().getSimpleName());
 		}
 	}
 }

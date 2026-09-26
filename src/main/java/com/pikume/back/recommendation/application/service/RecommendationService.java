@@ -67,7 +67,7 @@ public class RecommendationService implements ScoreDiaryCandidatesUseCase {
 				.sorted((a, b) -> Double.compare(b.score(), a.score()))
 				.collect(Collectors.toList());
 
-		log.debug("추천 스코어링 완료 - 후보: {}, 메타데이터 있음: {}", candidateDiaryIds.size(), metadataMap.size());
+		log.debug("event=recommendation_scored outcome=success candidateCount={} metadataCount={}", candidateDiaryIds.size(), metadataMap.size());
 		return results;
 	}
 }
