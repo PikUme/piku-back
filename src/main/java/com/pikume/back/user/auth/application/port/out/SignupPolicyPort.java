@@ -5,7 +5,6 @@ import java.util.List;
 public interface SignupPolicyPort {
     boolean enabled();
     boolean legacySignupEnabled();
-    boolean legacyEmailAccountsVerified();
     List<SignupAgreementDocument> agreements();
     int maxCodeAttempts();
     int resendSeconds();

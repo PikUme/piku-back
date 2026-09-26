@@ -50,7 +50,7 @@ abstract class SignupPersistenceTestSupport {
   jdbc.update("INSERT INTO nickname_write_mutex (id) SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM nickname_write_mutex WHERE id=1)");
   jdbc.update("DELETE FROM nickname_holds");
   tx.required(() -> {
-   em.createQuery("delete from UserAgreement").executeUpdate();em.createQuery("delete from UserOAuthAccount").executeUpdate();
+   em.createQuery("delete from UserAgreement").executeUpdate();
    em.createQuery("delete from SignupAuthentication").executeUpdate();em.createQuery("delete from Verification").executeUpdate();
    em.createQuery("delete from User").executeUpdate();em.createQuery("delete from SignupRateLimit").executeUpdate();
    em.persist(new SignupRateLimit("guard",Instant.EPOCH));return null;

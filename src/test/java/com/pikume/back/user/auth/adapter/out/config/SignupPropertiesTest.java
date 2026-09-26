@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.*;
 class SignupPropertiesTest {
     @Test void disabledDefaultsPermitLegacyButNeverAssumeEmailProvenance() {
         var p=new SignupProperties();p.validate();
-        assertThat(p.enabled()).isFalse();assertThat(p.legacySignupEnabled()).isTrue();assertThat(p.legacyEmailAccountsVerified()).isFalse();
+        assertThat(p.enabled()).isFalse();assertThat(p.legacySignupEnabled()).isTrue();
     }
     @Test void enablingWithoutActualDocumentsFailsAndNeverLeavesLegacyBypass() {
         var p=new SignupProperties();p.setEnabled(true);

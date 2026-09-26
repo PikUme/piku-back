@@ -5,7 +5,6 @@ import com.pikume.back.user.auth.application.exception.SignupFlowException;
 import com.pikume.back.user.auth.application.port.out.SignupStorePort;
 import com.pikume.back.user.auth.domain.SignupAuthentication;
 import com.pikume.back.user.auth.domain.UserAgreement;
-import com.pikume.back.user.auth.domain.UserOAuthAccount;
 import com.pikume.back.user.auth.domain.Verification;
 import com.pikume.back.user.domain.User;
 import com.pikume.back.user.domain.vo.Email;
@@ -65,25 +64,6 @@ public class SignupPersistenceAdapter implements SignupStorePort {
         em.persist(user);
         em.flush();
         return user;
-    }
-
-    @Override
-    public Optional<UserOAuthAccount> findAccount(String provider, String subject) {
-        return em.createQuery("select a from UserOAuthAccount a where a.provider=:provider and a.providerSubject=:subject", UserOAuthAccount.class)
-        .setParameter("provider", provider).setParameter("subject", subject).getResultStream()
-        .filter(a -> a.getProviderSubject().equals(subject)).findFirst();
-    }
-
-    @Override
-    public Optional<UserOAuthAccount> findUserAccount(String userId, String provider) {
-        return em.createQuery("select a from UserOAuthAccount a where a.userId=:user and a.provider=:provider", UserOAuthAccount.class)
-        .setParameter("user", userId).setParameter("provider", provider).getResultStream().findFirst();
-    }
-
-    @Override
-    public void createAccount(UserOAuthAccount account) {
-        em.persist(account);
-        em.flush();
     }
 
     @Override

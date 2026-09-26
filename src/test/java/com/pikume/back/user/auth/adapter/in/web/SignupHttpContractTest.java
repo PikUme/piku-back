@@ -120,18 +120,8 @@ class SignupHttpContractTest {
         assertThat(response.getCookie(SignupWebCredentials.PROOF).getMaxAge()).isBetween(1,45);
     }
     @ParameterizedTest
-    @ValueSource(strings={"/api/auth/signup/social/email","/api/mobile/auth/signup/social/email"})
-    void removedSocialEmailEndpointCannotChangeAnAuthentication(String path) throws Exception {
-        mvc.perform(post(path).header("Origin","https://www.pikume.com")
-            .header("X-Signup-CSRF",CSRF).header("X-Signup-Binding",BINDING).header("X-Signup-Proof",PROOF)
-            .cookie(cookies()).contentType(MediaType.APPLICATION_JSON)
-            .content("{\"challengeId\":\"old-social-challenge\",\"email\":\"other@gmail.com\",\"code\":\"123456\"}"))
-            .andExpect(status().isNotFound());
-        verifyNoInteractions(flow);
-    }
-    @ParameterizedTest
-    @EnumSource(value=SignupFailure.class,names={"EMAIL_REQUIRED","INVALID_EMAIL"})
-    void unavailableProviderEmailReturnsAuthenticationRestartProblem(SignupFailure failure) throws Exception {
+    @EnumSource(value=SignupFailure.class,names={"INVALID_EMAIL"})
+    void invalidEmailReturnsAuthenticationRestartProblem(SignupFailure failure) throws Exception {
         given(flow.agree(any())).willThrow(new SignupFlowException(failure));
         mvc.perform(post("/api/mobile/auth/signup/agreements").header("X-Signup-Binding",BINDING)
             .header("X-Signup-Proof",PROOF).header("Device-Id","device").contentType(MediaType.APPLICATION_JSON)
@@ -190,7 +180,6 @@ class SignupHttpContractTest {
             .andExpect(status().isGone()).andExpect(jsonPath("$.code").value("LEGACY_SIGNUP_DISABLED"));
         verifyNoInteractions(legacy);
     }
-
 
     private Cookie[] cookies() {return new Cookie[]{new Cookie(SignupWebCredentials.BINDING,BINDING),new Cookie(SignupWebCredentials.CSRF,CSRF),new Cookie(SignupWebCredentials.PROOF,PROOF)};}
     private String emailBody() {return "{\"challengeId\":\"challenge\",\"email\":\"user@gmail.com\",\"code\":\"123456\",\"password\":\"abc@123\"}";}

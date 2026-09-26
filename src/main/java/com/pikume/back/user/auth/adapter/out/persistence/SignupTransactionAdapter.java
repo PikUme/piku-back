@@ -30,8 +30,6 @@ public class SignupTransactionAdapter implements SignupTransactionPort {
                 String name=constraint==null?"":constraint.toLowerCase(Locale.ROOT);
                 if (name.contains("uk6dotkott2kjsp8vw4d0m25fb7")) throw new SignupFlowException(SignupFailure.EMAIL_ALREADY_REGISTERED, error);
                 if (name.contains("uk2ty1xmrrgtn89xt7kyxx6ta7h")) throw new SignupFlowException(SignupFailure.NICKNAME_COLLISION, error);
-                if (name.contains("uk_oauth_provider_subject") || name.contains("uk_oauth_user_provider"))
-                throw new SignupFlowException(SignupFailure.ACCOUNT_LINK_CONFLICT, error);
             }
             throw error;
         }

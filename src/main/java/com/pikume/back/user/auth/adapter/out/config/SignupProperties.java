@@ -17,7 +17,6 @@ import java.util.Set;
 public class SignupProperties implements SignupPolicyPort {
     private boolean enabled = false;
     private boolean legacySignupEnabled = true;
-    private boolean legacyEmailAccountsVerified = false;
     private List<Agreement> agreements = new ArrayList<>();
     private int maxCodeAttempts = 5;
     private int resendSeconds = 60;
@@ -50,9 +49,7 @@ public class SignupProperties implements SignupPolicyPort {
     public boolean legacySignupEnabled() {
         return !enabled && legacySignupEnabled;
     }
-    public boolean legacyEmailAccountsVerified() {
-        return legacyEmailAccountsVerified;
-    }
+
     public List<SignupAgreementDocument> agreements() {
         return agreements.stream().map(a -> new SignupAgreementDocument(a.type, a.version, a.content, a.required)).toList();
     }

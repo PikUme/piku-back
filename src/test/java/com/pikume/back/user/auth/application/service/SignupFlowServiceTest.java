@@ -38,21 +38,6 @@ class SignupFlowServiceTest {
     void proof(SignupAuthentication p) { when(store.lockProof(anyString())).thenReturn(Optional.of(p)); }
     SignupAuthentication emailProof() { return SignupAuthentication.email(SignupFlowService.hash("proof"), SignupFlowService.hash("caller"), "new@gmail.com", "once-hashed", now); }
 
-
-    @Test void oldSocialProofWithoutEmailCannotResumeOrCreateAMember() {
-        var pending = SignupAuthentication.social(SignupFlowService.hash("proof"), SignupFlowService.hash("caller"), "GOOGLE", "Subject", "provider@naver.com", now);
-        org.springframework.test.util.ReflectionTestUtils.setField(pending, "verifiedEmail", null);
-        proof(pending);
-
-        assertThatThrownBy(() -> service.progress("proof", "caller"))
-            .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.PROOF_INVALID);
-        assertThatThrownBy(() -> service.agree(new SignupAgreementCommand("proof", "caller", consent)))
-            .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.PROOF_INVALID);
-
-        verify(store, never()).createUser(any());
-        verify(store, never()).recordAgreement(any());
-    }
-
     @Test void consentStoresActualVersionedContentAndClearsPasswordHash() {
         var p=emailProof();proof(p);
         var result=service.agree(new SignupAgreementCommand("proof","caller",consent));
@@ -75,13 +60,6 @@ class SignupFlowServiceTest {
             .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.EMAIL_ALREADY_REGISTERED);
     }
 
-
-    @Test void socialConsentKeepsPasswordNull() {
-        proof(SignupAuthentication.social(SignupFlowService.hash("proof"),SignupFlowService.hash("caller"),"GOOGLE","Subject","new@gmail.com",now));
-        service.agree(new SignupAgreementCommand("proof","caller",consent));
-        verify(store).createUser(argThat(u -> u.getPassword()==null && u.isProfileSetupRequired() && u.getNickname().equals("new")));
-        verify(store).createAccount(any());
-    }
     @Test void unavailableDefaultCandidatesLeaveProofUnconsumedAndCreateNoUser() {
         var proof=emailProof();proof(proof);
         when(uniqueness.isNicknameInUse(any())).thenReturn(true);
@@ -115,7 +93,6 @@ class SignupFlowServiceTest {
             .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.LEGACY_SIGNUP_DISABLED);
         verifyNoInteractions(legacy);
     }
-
 
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings = {"MISSING", "CALLER", "EXPIRED", "CODE", "EXHAUSTED", "CONSUMED"})

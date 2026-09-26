@@ -150,7 +150,7 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 		requireValidPassword(command.newPassword());
 		User user = loadUserForPasswordResetPort.loadPasswordResetUser(command.email())
 				.orElseThrow(() -> new AuthException(AuthErrorCode.USER_NOT_FOUND));
-		if (user.isWithdrawn() || user.getPassword() == null) {
+		if (user.isWithdrawn()) {
 			throw new com.pikume.back.user.auth.application.exception.InvalidCredentialsException();
 		}
 		VerifiedEmail verified = getValidVerifiedEmail(command.email(), VerificationType.PASSWORD_RESET);

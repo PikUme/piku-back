@@ -7,7 +7,6 @@ import com.pikume.back.user.auth.domain.Verification;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -61,12 +60,10 @@ class SignupConcurrencyMySqlIntegrationTest extends SignupPersistenceTestSupport
         assertThat(workers.awaitTermination(15,TimeUnit.SECONDS)).isTrue();
     }
 
-    @ParameterizedTest
-    @CsvSource({"false,true,true","true,true,true","true,false,true","true,true,false"})
-    void consentUniquenessRacesUseCommittedRecovery(boolean social,boolean sameEmail,boolean sameSubject) throws Exception {
-        String first=social?socialProof("Subject","same@gmail.com"):emailProof("same@gmail.com");
-        String second=social?socialProof(sameSubject?"Subject":"OtherSubject",sameEmail?"same@gmail.com":"other@gmail.com")
-            :emailProof("same@gmail.com");
+    @Test
+    void competingEmailProofsCannotCreateDuplicateMembers() throws Exception {
+        String first=emailProof("same@gmail.com");
+        String second=emailProof("same@gmail.com");
         CyclicBarrier bothProofsLocked=new CyclicBarrier(2);
         AtomicInteger reads=new AtomicInteger();
         doAnswer(call->{
@@ -78,42 +75,10 @@ class SignupConcurrencyMySqlIntegrationTest extends SignupPersistenceTestSupport
         Future<Object> a=workers.submit(()->outcome(()->service.agree(new SignupAgreementCommand(first,"caller",agreements))));
         Future<Object> b=workers.submit(()->outcome(()->service.agree(new SignupAgreementCommand(second,"caller",agreements))));
         List<Object> results=List.of(a.get(15,TimeUnit.SECONDS),b.get(15,TimeUnit.SECONDS));
-        if(social&&sameSubject) {
-            assertThat(results).allSatisfy(value->assertThat(value).isInstanceOf(SignupProofResult.class));
-            assertThat(((SignupProofResult)results.get(0)).progress().userId()).isEqualTo(((SignupProofResult)results.get(1)).progress().userId());
-        } else {
-            assertThat(results.stream().filter(SignupProofResult.class::isInstance)).hasSize(1);
-            assertThat(results).contains(SignupFailure.EMAIL_ALREADY_REGISTERED);
-        }
+        assertThat(results.stream().filter(SignupProofResult.class::isInstance)).hasSize(1);
+        assertThat(results).contains(SignupFailure.EMAIL_ALREADY_REGISTERED);
         assertThat(count("User")).isEqualTo(1);
         assertThat(count("UserAgreement")).isEqualTo(1);
-        assertThat(count("UserOAuthAccount")).isEqualTo(social?1:0);
-    }
-
-    @Test void oldSocialProofWithoutEmailCannotResumeOrCreateAMember() {
-        String proof=socialProof("OldSubject","old@naver.com");
-        jdbc.update("UPDATE signup_authentications SET verified_email=NULL WHERE token_hash=?",SignupFlowService.hash(proof));
-
-        assertThat(outcome(()->service.progress(proof,"caller"))).isEqualTo(SignupFailure.PROOF_INVALID);
-        assertThat(outcome(()->service.agree(new SignupAgreementCommand(proof,"caller",agreements)))).isEqualTo(SignupFailure.PROOF_INVALID);
-
-        assertThat(count("User")).isZero();
-        assertThat(count("UserAgreement")).isZero();
-        assertThat(count("UserOAuthAccount")).isZero();
-    }
-
-    @Test void oldSocialChallengeCannotBeVerifiedOrResentAsEmailSignup() {
-        Challenge challenge=readyChallenge();
-        jdbc.update("UPDATE verification SET signup_proof_hash=? WHERE challenge_id=?",SignupFlowService.hash("old-proof"),challenge.id());
-        org.mockito.Mockito.clearInvocations(sender);
-
-        assertThat(outcome(()->verify(challenge,"123456"))).isEqualTo(SignupFailure.CHALLENGE_INVALID);
-        assertThat(outcome(()->resend(challenge))).isEqualTo(SignupFailure.CHALLENGE_INVALID);
-
-        org.mockito.Mockito.verifyNoInteractions(sender);
-        assertThat(count("SignupAuthentication")).isZero();
-        assertThat(count("User")).isZero();
-        assertThat((Instant)tx.required(()->store.lockChallenge(challenge.id()).orElseThrow().getConsumedAt())).isNull();
     }
 
     @Test void parallelDefaultsUseDatabaseNicknameEqualityAcrossEmailDomains() throws Exception {
@@ -360,12 +325,7 @@ class SignupConcurrencyMySqlIntegrationTest extends SignupPersistenceTestSupport
     private EmailSignupChallengeResult resend(Challenge challenge) {
         return service.sendEmailCode(new EmailSignupChallengeCommand("code@gmail.com","caller","origin",challenge.id()));
     }
-    private String socialProof(String subject,String email) {
-        String raw=java.util.UUID.randomUUID().toString();
-        tx.required(()->{store.saveProof(com.pikume.back.user.auth.domain.SignupAuthentication.social(
-            SignupFlowService.hash(raw),SignupFlowService.hash("caller"),"GOOGLE",subject,email,Instant.now()));return null;});
-        return raw;
-    }
+
     private void awaitDatabaseWait() {
         await().atMost(Duration.ofSeconds(8)).until(()->observer.queryForObject("SELECT COUNT(*) FROM performance_schema.data_lock_waits",Long.class)>0);
     }
