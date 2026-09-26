@@ -1,6 +1,7 @@
 package com.pikume.back.social.adapter.in.web;
 
 import com.pikume.back.security.principal.UserPrincipal;
+import com.pikume.back.global.adapter.in.web.pagination.OffsetPageResponse;
 import com.pikume.back.social.adapter.in.web.dto.CommentListResponseDto;
 import com.pikume.back.social.adapter.in.web.dto.FriendRequestDto;
 import io.swagger.v3.core.converter.ModelConverters;
@@ -31,6 +32,23 @@ class SocialOpenApiSchemaTest {
 		assertThat(response.getProperties().get("userId").getNullable()).isTrue();
 		assertThat(response.getProperties().get("nickname").getNullable()).isTrue();
 		assertThat(response.getProperties().get("avatar").getNullable()).isTrue();
+		assertThat(response.getProperties()).containsKeys("canReply", "canEdit", "canDelete");
+	}
+
+	@Test
+	@DisplayName("offset page 응답은 최상위와 중첩 호환 필드를 문서화한다")
+	void offsetPageSchemaDocumentsCompatibilityFields() {
+		Map<String, Schema> schemas = ModelConverters.getInstance().readAll(OffsetPageResponse.class);
+		Schema<?> response = schemas.get("OffsetPageResponse");
+		Schema<?> pageable = schemas.get("PageableResponse");
+		Schema<?> sort = schemas.get("SortResponse");
+
+		assertThat(response.getProperties()).containsOnlyKeys(
+				"content", "pageable", "last", "totalPages", "totalElements", "size",
+				"number", "sort", "first", "numberOfElements", "empty");
+		assertThat(pageable.getProperties()).containsOnlyKeys(
+				"pageNumber", "pageSize", "sort", "offset", "paged", "unpaged");
+		assertThat(sort.getProperties()).containsOnlyKeys("empty", "sorted", "unsorted");
 	}
 
 	@Test

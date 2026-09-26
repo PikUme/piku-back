@@ -10,7 +10,6 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springdoc.core.annotations.ParameterObject;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
@@ -23,6 +22,8 @@ import com.pikume.back.security.principal.UserPrincipal;
 import com.pikume.back.global.pagination.PageQuery;
 import com.pikume.back.global.pagination.PageResult;
 import com.pikume.back.global.pagination.SpringPageMapper;
+import com.pikume.back.global.adapter.in.web.pagination.OffsetPageResponse;
+import com.pikume.back.global.adapter.in.web.pagination.OffsetPageResponseMapper;
 import com.pikume.back.social.adapter.in.web.dto.CommentDeleteResponseDto;
 import com.pikume.back.social.application.dto.CommentDeleteResult;
 import com.pikume.back.social.application.dto.CommentListItemResult;
@@ -92,7 +93,7 @@ public class CommentController {
 			@ApiResponse(responseCode = "404", description = "조회 가능한 일기를 찾을 수 없음", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = ProblemDetail.class)))
 	})
 	@GetMapping
-	public ResponseEntity<Page<CommentListResponseDto>> getRootComments(
+	public ResponseEntity<OffsetPageResponse<CommentListResponseDto>> getRootComments(
 			@RequestParam Long diaryId,
 			@ParameterObject @PageableDefault(sort = "createdAt", direction = Sort.Direction.DESC, size = 10) Pageable pageable,
 			@AuthenticationPrincipal UserPrincipal userDetails) {
@@ -103,7 +104,8 @@ public class CommentController {
 		PageResult<CommentListResponseDto> rootCommentResults = queryCommentPageUseCase.queryRootCommentPage(diaryId, pageQuery,
 				viewerId)
 				.map(this::toResponse);
-		Page<CommentListResponseDto> rootCommentsPage = SpringPageMapper.toSpringPage(rootCommentResults, pageable);
+		OffsetPageResponse<CommentListResponseDto> rootCommentsPage = OffsetPageResponseMapper.toResponse(rootCommentResults,
+				pageable);
 
 		return ResponseEntity.status(HttpStatus.OK).body(rootCommentsPage);
 	}
@@ -114,7 +116,7 @@ public class CommentController {
 			@ApiResponse(responseCode = "404", description = "일기 또는 부모 댓글을 찾을 수 없음", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = ProblemDetail.class)))
 	})
 	@GetMapping("/{parentCommentId}/replies")
-	public ResponseEntity<Page<CommentListResponseDto>> getReplies(
+	public ResponseEntity<OffsetPageResponse<CommentListResponseDto>> getReplies(
 			@PathVariable Long parentCommentId,
 			@ParameterObject @PageableDefault(sort = "createdAt", direction = Sort.Direction.ASC, size = 10) Pageable pageable,
 			@AuthenticationPrincipal UserPrincipal userDetails) {
@@ -126,7 +128,7 @@ public class CommentController {
 		PageResult<CommentListResponseDto> replyResults = queryCommentPageUseCase.queryReplyPage(parentCommentId, pageQuery,
 				viewerId)
 				.map(this::toResponse);
-		Page<CommentListResponseDto> repliesPage = SpringPageMapper.toSpringPage(replyResults, pageable);
+		OffsetPageResponse<CommentListResponseDto> repliesPage = OffsetPageResponseMapper.toResponse(replyResults, pageable);
 
 		return ResponseEntity.ok(repliesPage);
 	}

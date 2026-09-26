@@ -2,17 +2,67 @@ package com.pikume.back.architecture;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
+import org.springframework.core.annotation.AnnotatedElementUtils;
+import org.springframework.core.type.filter.AnnotationTypeFilter;
+import org.springframework.data.domain.Page;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.lang.reflect.GenericArrayType;
+import java.lang.reflect.Modifier;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
+import java.lang.reflect.WildcardType;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Predicate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @DisplayName("Architecture boundaries")
 class ArchitectureBoundaryTest {
+
+	@Test
+	@DisplayName("Controller 응답 타입과 중첩 DTO는 Spring Data Page를 노출하지 않는다.")
+	void controllerResponsesDoNotExposeSpringDataPages() throws ClassNotFoundException {
+		ClassPathScanningCandidateComponentProvider scanner =
+				new ClassPathScanningCandidateComponentProvider(false);
+		scanner.addIncludeFilter(new AnnotationTypeFilter(RestController.class));
+		List<String> violations = new ArrayList<>();
+
+		for (var bean : scanner.findCandidateComponents("com.pikume.back")) {
+			Class<?> controller = Class.forName(bean.getBeanClassName());
+			for (var method : controller.getDeclaredMethods()) {
+				if (AnnotatedElementUtils.hasAnnotation(method, RequestMapping.class)) {
+					findPageLeaks(method.getGenericReturnType(), method.toGenericString(), new HashSet<>(), violations);
+				}
+			}
+		}
+
+		assertThat(violations).isEmpty();
+	}
+
+	@Test
+	@DisplayName("응답 래퍼 내부 DTO에 숨은 Page도 경계 위반으로 찾는다.")
+	void pageBoundaryGuardFindsWrappedNestedPages() throws NoSuchMethodException {
+		Type leakingReturnType = ArchitectureBoundaryTest.class
+				.getDeclaredMethod("leakingResponseFixture")
+				.getGenericReturnType();
+		List<String> violations = new ArrayList<>();
+
+		findPageLeaks(leakingReturnType, "controlled mutation", new HashSet<>(), violations);
+
+		assertThat(violations).singleElement()
+				.satisfies(violation -> assertThat(violation).contains("NestedPageFixture.page", Page.class.getName()));
+	}
 
 	@Test
 	@DisplayName("security outbound adapters는 user persistence adapters 또는 user domain entities에 대한 의존성을 갖지 않는다.")
@@ -546,6 +596,63 @@ class ArchitectureBoundaryTest {
 					.map(Path::toString)
 					.toList();
 		}
+	}
+
+	private void findPageLeaks(Type type, String path, Set<Type> visited, List<String> violations) {
+		if (type == null || !visited.add(type)) {
+			return;
+		}
+		if (type instanceof ParameterizedType parameterizedType) {
+			findPageLeaks(parameterizedType.getRawType(), path, visited, violations);
+			for (Type argument : parameterizedType.getActualTypeArguments()) {
+				findPageLeaks(argument, path, visited, violations);
+			}
+			return;
+		}
+		if (type instanceof WildcardType wildcardType) {
+			for (Type bound : wildcardType.getUpperBounds()) {
+				findPageLeaks(bound, path, visited, violations);
+			}
+			for (Type bound : wildcardType.getLowerBounds()) {
+				findPageLeaks(bound, path, visited, violations);
+			}
+			return;
+		}
+		if (type instanceof GenericArrayType arrayType) {
+			findPageLeaks(arrayType.getGenericComponentType(), path, visited, violations);
+			return;
+		}
+		if (!(type instanceof Class<?> typeClass)) {
+			return;
+		}
+		if (Page.class.isAssignableFrom(typeClass)) {
+			violations.add(path + " -> " + typeClass.getName());
+			return;
+		}
+		if (typeClass.isArray()) {
+			findPageLeaks(typeClass.getComponentType(), path, visited, violations);
+			return;
+		}
+		if (!typeClass.getName().startsWith("com.pikume.back.")) {
+			return;
+		}
+		for (Field field : typeClass.getDeclaredFields()) {
+			if (!field.isSynthetic() && !Modifier.isStatic(field.getModifiers())) {
+				findPageLeaks(field.getGenericType(), path + " -> " + typeClass.getSimpleName() + "." + field.getName(),
+						visited, violations);
+			}
+		}
+	}
+
+	@SuppressWarnings("unused")
+	private ResponseEntity<WrappedPageFixture> leakingResponseFixture() {
+		return null;
+	}
+
+	private record WrappedPageFixture(NestedPageFixture body) {
+	}
+
+	private record NestedPageFixture(Page<String> page) {
 	}
 
 	private boolean importsUserPersistenceOrDomain(Path path) {

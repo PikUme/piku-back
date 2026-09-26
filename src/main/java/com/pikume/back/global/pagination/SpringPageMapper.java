@@ -1,7 +1,6 @@
 package com.pikume.back.global.pagination;
 
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -41,10 +40,4 @@ public final class SpringPageMapper {
 				page.getTotalElements());
 	}
 
-	public static <T> Page<T> toSpringPage(PageResult<T> pageResult, Pageable pageable) {
-		return new PageImpl<>(
-				pageResult.content(),
-				PageRequest.of(pageResult.page(), pageResult.size(), pageable.getSort()),
-				pageResult.totalElements());
-	}
 }
