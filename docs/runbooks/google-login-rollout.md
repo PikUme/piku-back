@@ -68,14 +68,4 @@ Google 검증 실패·코드 교환 실패·요청 제한·DB 잠금 대기와 �
 - 신규 Google 신원은 제공자 이메일의 존재·형식·최대 255자·기존 허용 도메인을 확인한다. 외부 이메일도 추가 코드 인증 없이 동의로 보내되 email_verified·authoritative 조건은 기존 Gmail 자동 연결에서 계속 필수다.
 - 이메일 누락은 `EMAIL_REQUIRED`, 부적합은 `INVALID_EMAIL`이다. 모바일은 HTTP 400 Problem Details와 `nextAction: AUTHENTICATE`, 웹 콜백은 고정 복귀 URI의 `oauthError`로만 전달한다. 실패 시 가입 증명·회원·서비스 세션을 새로 발급하지 않는다.
 - 기존 subject 로그인·재인증 명시 연결은 신규 이메일 검사와 분리한다. 같은 이메일만으로 다른 회원에 연결하지 않는다.
-- 신규 증명은 바로 `AGREEMENTS`이며 소셜 이메일 보완 API·`VERIFY_EMAIL`을 제거한 클라이언트와 함께 적용한다. 과거 이메일 없는 증명과 소셜 challenge의 거절·정리는 아래 「PR 분리 전 스키마와 소셜 이메일 보완 호환」 절을 따른다.
-
-## PR 분리 전 스키마와 소셜 이메일 보완 호환
-
-지원하는 이관 경로는 분리된 챕터 가입 V16–V18에서 이 PR의 V19를 적용하는 경로다. V17은 이메일 가입 전용이며 V19가 외부 계정 테이블과 제공자 컬럼을 생성한다. 기존 이메일 proof·challenge·동의와 고정 만료 시각은 보존한다.
-
-분리 전 PR의 V17 또는 V19를 이미 적용한 환경은 체크섬·설명이 달라 그대로 업그레이드할 수 없다. 이 작업에서 공유 DB를 변경하거나 Flyway `repair`, 이력 수정, 데이터 삭제·초기화를 실행하지 않는다. 실제 적용 이력과 보존할 데이터를 확인한 뒤 별도 이관 절차를 결정해야 한다.
-
-소셜 이메일 보완을 실험한 데이터에 대한 애플리케이션 방어는 Google 변경이 소유한다. V19는 `verification.signup_proof_hash` 호환 컬럼을 추가하며 새 일반 이메일 challenge에는 값을 저장하지 않는다. 이 컬럼에 값이 있는 과거 challenge의 재발송·이메일 인증은 `CHALLENGE_INVALID`로 거절한다. 이메일 없는 과거 SOCIAL proof는 소비 시 `PROOF_INVALID`, 진행 조회 시 `AUTHENTICATE`로 복구되며 만료 정리 대상으로 남는다. 이는 과거 실험 스키마를 자동 이관한다는 의미가 아니다.
-
-웹·모바일은 `/signup/social/email`을 호출하거나 `VERIFY_EMAIL`로 분기하지 않는다. 신규 소셜 이메일 누락·부적합은 `EMAIL_REQUIRED`·`INVALID_EMAIL`로 인증을 다시 시작한다. 이메일 재발송 제한, 과거 proof·challenge 재사용 거절, 동의 원자성과 같은 subject의 기존 회원 복구를 함께 검증한다. 신규 가입의 제공자 이메일 수용으로 기존 계정 자동 연결 보호 조건을 완화하지 않는다.
+- 신규 증명은 바로 `AGREEMENTS`이며 소셜 이메일 보완 API·`VERIFY_EMAIL`을 제거한 클라이언트와 함께 적용한다.
