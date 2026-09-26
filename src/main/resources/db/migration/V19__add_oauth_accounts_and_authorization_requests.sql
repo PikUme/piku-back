@@ -1,3 +1,29 @@
+-- OAuth storage belongs to the Google login rollout, after chapter signup V16-V18.
+ALTER TABLE signup_authentications
+    ADD COLUMN provider VARCHAR(20) DEFAULT NULL AFTER method,
+    ADD COLUMN provider_subject VARCHAR(255) COLLATE utf8mb4_0900_bin DEFAULT NULL AFTER provider,
+    ADD COLUMN email_verification_source VARCHAR(20) DEFAULT NULL AFTER password_hash;
+
+-- Existing chapter and legacy email proofs were verified by the service.
+UPDATE signup_authentications
+SET email_verification_source = 'SERVICE'
+WHERE method = 'EMAIL';
+
+-- Compatibility guard for historical social-email challenges; new email challenges leave this null.
+ALTER TABLE verification
+    ADD COLUMN signup_proof_hash VARCHAR(64) DEFAULT NULL AFTER caller_hash;
+
+CREATE TABLE user_oauth_accounts (
+    id VARCHAR(36) NOT NULL PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
+    provider VARCHAR(20) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    provider_subject VARCHAR(255) COLLATE utf8mb4_0900_bin NOT NULL,
+    linked_at DATETIME(6) NOT NULL,
+    UNIQUE KEY uk_oauth_provider_subject (provider, provider_subject),
+    UNIQUE KEY uk_oauth_user_provider (user_id, provider),
+    CONSTRAINT fk_oauth_user FOREIGN KEY (user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 -- Requests contain hashes/ciphertext only; codes, ID tokens and session credentials never enter this table.
 CREATE TABLE oauth_authorization_requests (
     id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,

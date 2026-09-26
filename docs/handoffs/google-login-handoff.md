@@ -126,3 +126,7 @@ JSON API는 `application/problem+json`의 `status`, `detail`, `type`, `instance`
 `Device-Id`는 비어 있지 않은 최대 128자 헤더다. 모바일 registration은 최대 64자이며 `web`을 사용할 수 없다. 모바일 state와 idToken은 각각 최대 128자·16,000자다. `link: true` 요청의 password는 기존 비밀번호이며 최대 72자다. `expiresAt`는 UTC ISO 8601 시각이다. 실제 기기 토큰의 nonce·audience·authorized party와 웹 HTTPS 쿠키·CORS는 환경별 확인이 필요하다.
 
 일반 로그인·Google 완료·본인 조회는 회원 `id`, `nickname`, `avatarUrl`, `profileSetupStatus`, `characterId`를 전달한다. 연결 목록·해제·이메일 변경 API는 제공하지 않는다. 프론트·모바일의 파일 구성과 SDK 선택은 각 저장소에서 결정한다.
+
+## 일반 이메일 가입으로 전환
+
+인증 화면에서 소셜 가입을 이메일 가입으로 바꾸면 이메일 코드 발송 요청에 `restartAuthentication: true`를 보낸다. 발송 성공 후 웹은 이전 가입 증명 쿠키를 정리하고 모바일은 저장한 proof를 삭제한 뒤 새 challengeId를 사용한다. 발송 실패 시 이전 증명은 유지한다. 일반 이메일 발송·인증은 소셜 증명에 결속하지 않고 제공자 이메일을 변경하지 않는다. 기존 회원 삭제나 발송 제한 초기화도 수행하지 않는다.

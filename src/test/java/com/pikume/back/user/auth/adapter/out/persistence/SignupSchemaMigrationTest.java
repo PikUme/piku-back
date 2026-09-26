@@ -23,24 +23,18 @@ class SignupSchemaMigrationTest {
         jdbc.update("INSERT INTO verification (email,code,type,expires_at) VALUES ('legacy@gmail.com','123456','SIGN_UP',NOW())");
         Flyway.configure().dataSource(source).target("17").load().migrate();
     }
-    void user(String id) {
-        jdbc.update("INSERT INTO users (id,email,nickname,character_id) VALUES (?,?,?,1)",id,id+"@gmail.com",id);
+    @Test void chapterSchemaContainsOnlyEmailSignupArtifacts() {
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='user_oauth_accounts'", Integer.class)).isZero();
+        assertThat(jdbc.queryForList("SELECT column_name FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='signup_authentications'", String.class))
+                .doesNotContain("provider", "provider_subject", "email_verification_source");
+        assertThat(jdbc.queryForList("SELECT column_name FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='verification'", String.class))
+                .doesNotContain("signup_proof_hash");
     }
-    void link(String id,String user,String subject) {
-        jdbc.update("INSERT INTO user_oauth_accounts (id,user_id,provider,provider_subject,linked_at) VALUES (?,?,'GOOGLE',?,NOW())",id,user,subject);
-    }
-    @Test void preservesLegacyVerificationAndStoresStrictSubjectComparison() {
+
+    @Test void preservesLegacyVerification() {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM verification WHERE challenge_id IS NULL AND caller_hash IS NULL AND attempts IS NULL",Integer.class)).isEqualTo(1);
-        user("u1");user("u2");user("u3");
-        link("l1","u1","Subject");link("l2","u2","subject");link("l3","u3","Subject ");
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM user_oauth_accounts",Integer.class)).isEqualTo(3);
-        assertThat(jdbc.queryForObject("SELECT user_id FROM user_oauth_accounts WHERE provider='GOOGLE' AND provider_subject='Subject'",String.class)).isEqualTo("u1");
     }
-    @Test void enforcesBothSocialUniquenessConstraints() {
-        user("u1");user("u2");link("l1","u1","subject");
-        assertThatThrownBy(() -> link("l2","u2","subject")).isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> link("l3","u1","different-subject")).isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
-    }
+
     @Test void challengeIdentifiersAreUniqueButLegacyNullIdentifiersCanRepeat() {
         jdbc.update("INSERT INTO verification (email,code,type,expires_at,challenge_id) VALUES ('new@gmail.com','hash','SIGN_UP',NOW(),'challenge')");
         assertThatThrownBy(() -> jdbc.update("INSERT INTO verification (email,code,type,expires_at,challenge_id) VALUES ('other@gmail.com','hash','SIGN_UP',NOW(),'challenge')"))

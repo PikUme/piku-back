@@ -58,7 +58,7 @@
 | --- | --- | --- |
 | GET `/progress` | 로그인했다면 Bearer 토큰. 진행 중 증명은 아래 전달 규칙 적용 | `enabled`, `progress`, 웹 `csrfToken` 또는 모바일 `callerBinding`. 페이지 진입으로 DB 가입 레코드를 생성하지 않음 |
 | GET `/agreements` | 없음 | 문서 배열: `type`, `version`, `content`, `required` |
-| POST `/email/code` | `email`, 선택 `challengeId`, 선택 `restartAuthentication` | `challengeId`, `expiresAt`, `resendAvailableAt`. 일반 이메일 가입 코드만 발송하며 소셜 증명에는 결속하지 않음. true면 이전 challenge와 분리된 새 인증 시작 |
+| POST `/email/code` | `email`, 선택 `challengeId`, 선택 `restartAuthentication` | `challengeId`, `expiresAt`, `resendAvailableAt`. 일반 이메일 가입 코드를 발송. true면 이전 challenge와 분리된 새 인증 시작 |
 | POST `/email` | `challengeId`, `email`, `code`, `password` | 이메일 인증·비밀번호 검증 후 `progress`와 가입 증명 전달 |
 | POST `/agreements` | `agreements` 배열의 `type`, `version`, `agreed`; 가입 증명과 `Device-Id` 필수 | 회원 생성 후 `progress`, `user`, 로그인 자격 전달 |
 | POST `/nickname` | Bearer 토큰, `nickname` | `nickname`, `expiresAt`. 3분 예약 |
@@ -71,7 +71,7 @@
 
 프로필 입력란은 서버 응답의 `user.nickname`으로 미리 채운다. 정규화 후 본인에게 저장된 현재 기본 닉네임과 같으면 별도 중복 확인·예약 없이 캐릭터와 함께 완료할 수 있다. 수정한 닉네임에는 기존 3분 예약이 필요하다. 기본값으로 되돌려 완료하면 그 회원의 다른 예약도 같은 트랜잭션에서 해제한다. 본인 현재값으로 중복 확인 API를 호출해도 기존처럼 `nickname`, 유효한 `expiresAt`을 반환하며 null 만료 시각을 추가하지 않는다. 기존 `가입대기_` 닉네임을 쓰는 미완료 회원은 새 닉네임을 예약·선택해야 한다. 완료 API 제출 전에는 기본값을 가지고 있어도 `REQUIRED`와 이용 제한을 유지한다.
 
-인증 화면으로 돌아가 다른 이메일로 가입하거나 소셜 가입을 이메일 가입으로 바꾸면 코드 발송에 restartAuthentication: true를 보낸다. 서버는 이전 challengeId를 사용하지 않으며 발송 성공 후 웹의 이전 증명 쿠키를 지운다. 모바일은 성공 후 저장한 proof를 지우고 새 challengeId를 사용한다. 실패 시 이전 증명을 유지한다. 일반 재발송은 새 challengeId와 기본값 false를 사용한다. 코드 발송은 항상 일반 이메일 가입이며 기존 소셜 증명의 이메일을 수정하지 않는다. 옵션으로 기존 회원이나 가입 자료를 삭제하지 않으며 발송 제한을 우회하지 않는다.
+인증 화면으로 돌아가 다른 이메일로 가입하면 코드 발송에 restartAuthentication: true를 보낸다. 서버는 이전 challengeId를 사용하지 않으며 발송 성공 후 웹의 이전 증명 쿠키를 지운다. 모바일은 성공 후 저장한 proof를 지우고 새 challengeId를 사용한다. 실패 시 이전 증명을 유지한다. 일반 재발송은 새 challengeId와 기본값 false를 사용한다. 코드 발송은 이메일 가입 인증을 시작한다. 옵션으로 기존 회원이나 가입 자료를 삭제하지 않으며 발송 제한을 우회하지 않는다.
 
 ### 필드 형식과 공통 응답
 
@@ -100,7 +100,7 @@
 | `progress.userId` | 문자열 또는 null. 회원이 정해지기 전에는 null |
 | `progress.profileSetupStatus` | `REQUIRED`, `COMPLETED` 또는 null |
 | `progress.expiresAt` | 가입 증명 만료 시각 또는 null. 회원 생성 이후에도 증명에서 이어진 응답이면 시각이 남을 수 있음 |
-| `user` | 회원이 결정되면 `{id: string, nickname: string, avatarUrl: string 또는 null, profileSetupStatus: string, characterId: number 또는 null}`. `characterId`는 현재 회원에 저장된 선택이며 신규 회원은 기본 캐릭터 ID. 이메일과 외부 계정 연결 여부는 포함하지 않음 |
+| `user` | 회원이 결정되면 `{id: string, nickname: string, avatarUrl: string 또는 null, profileSetupStatus: string, characterId: number 또는 null}`. `characterId`는 현재 회원에 저장된 선택이며 신규 회원은 기본 캐릭터 ID. 이메일은 포함하지 않음 |
 | `tokens` | 모바일에서 회원이 결정됐을 때만 포함. `tokenType: "Bearer"`, `accessToken: string`, `refreshToken: string`, `accessTokenExpiresIn: number`, `refreshTokenExpiresIn: number`. 만료 기간 단위는 초 |
 | `proof` | 모바일에서 가입 증명이 생성되거나 전달될 때 문자열로 포함. 동의 후 회원 생성 응답에도 남을 수 있음. 웹은 본문에 포함하지 않음 |
 
@@ -176,7 +176,7 @@ GET `/progress`로 받은 `csrfToken`을 이후 신규 가입 쓰기의 `X-Signu
 
 GET `/progress`에서 받은 `callerBinding`을 가입 진행 동안 보관하고 이후 `X-Signup-Binding` 헤더로 보낸다. 인증 성공 응답의 `proof`는 `X-Signup-Proof` 헤더로 전달한다. 웹 CSRF 헤더와 쿠키는 사용하지 않는다. 기기·토큰 보관은 모바일의 기존 인증 저장 방식에 맞추되 URL이나 로그에 넣지 않는다.
 
-모바일의 모든 가입 쓰기에는 `X-Signup-Binding`을 전달하고 동의에는 `X-Signup-Proof`도 전달한다. 일반 이메일 발송·인증은 소셜 증명에 결속하지 않는다. 동의에는 `Device-Id`, 프로필 예약·완료·탈퇴에는 Bearer가 추가로 필요하다. 프로필 단계에서도 호출자 헤더를 생략하지 않는다.
+모바일의 모든 가입 쓰기에는 `X-Signup-Binding`을 전달하고 동의에는 `X-Signup-Proof`도 전달한다. 동의에는 `Device-Id`, 프로필 예약·완료·탈퇴에는 Bearer가 추가로 필요하다. 프로필 단계에서도 호출자 헤더를 생략하지 않는다.
 
 회원이 결정된 응답은 `tokens`에 기존 모바일 형식인 `tokenType`, `accessToken`, `refreshToken`, `accessTokenExpiresIn`, `refreshTokenExpiresIn`을 담는다. 새 회원 인증 단계에서는 `tokens` 없이 `proof`와 `progress`를 받는다. 모바일 현재 회원 조회는 GET `/api/mobile/auth/me`다. 기존 로그인·재발급·로그아웃 API는 유지한다.
 
@@ -216,7 +216,7 @@ JSON API 오류는 RFC 9457 `application/problem+json`이며 `type`, `title`, `s
 | 400 | `PROOF_INVALID`, `FLOW_MISMATCH` | 현재 진행을 조회하고 올바른 인증 흐름으로 다시 시작 |
 | 400 | `CHALLENGE_INVALID` | 현재 일반 이메일 인증 시도와 호출자의 결합 확인 후 코드 재발송 |
 | 400 | `CODE_MISMATCH` | 코드 재입력. 같은 오입력을 자동 재시도하지 않음 |
-| 400 | `EMAIL_REQUIRED`, `INVALID_EMAIL` | 이메일 누락·부적합으로 증명·회원 생성 없이 `AUTHENTICATE`로 재시작. 소셜 가입은 제공자 이메일을 직접 수정할 수 없고, 일반 이메일 가입은 입력을 수정 |
+| 400 | `INVALID_EMAIL` | 이메일 누락·부적합으로 증명·회원 생성 없이 `AUTHENTICATE`로 재시작. 이메일 입력을 수정 |
 | 400 | `AGREEMENTS_REQUIRED` | 필수 문서의 동의 여부 확인 |
 | 400 | `INVALID_NICKNAME`, `INVALID_CHARACTER` | 닉네임 수정 또는 고정 캐릭터 목록 재조회 |
 | 400 | `CALLER_REQUIRED` | 진행 조회로 호출자 쿠키·헤더 초기화. 호출자를 잃었으면 종전 증명을 재사용할 수 있다고 가정하지 않음 |
@@ -228,7 +228,7 @@ JSON API 오류는 RFC 9457 `application/problem+json`이며 `type`, `title`, `s
 | 403 | `PROFILE_SETUP_REQUIRED` | 본인 진행 조회 후 가입 프로필 화면으로 이동 |
 | 409 | `PROOF_ALREADY_USED` | 상태 조회 후 이미 만들어진 회원 복구. 다른 제출 내용으로 증명을 재사용하지 않음 |
 | 409 | `AGREEMENT_VERSION_MISMATCH` | 최신 본문을 다시 표시하고 동의 받기 |
-| 409 | `ACCOUNT_LINK_CONFLICT`, `EMAIL_ALREADY_REGISTERED` | 기존 로그인으로 같은 회원 복구. 외부 계정 연결은 제공자 인증 변경의 범위 |
+| 409 | `EMAIL_ALREADY_REGISTERED` | 기존 이메일 로그인으로 같은 회원 복구 |
 | 409 | `NICKNAME_COLLISION` | 기본 닉네임 후보 소진 또는 생성 충돌. 같은 동의 요청으로 재시도 가능 |
 | 409 | `HOLD_REQUIRED` | 닉네임 중복 확인을 다시 수행 |
 | 409 | `NICKNAME_UNAVAILABLE` | 다른 닉네임 선택. 이전 예약은 유지 |
@@ -267,4 +267,4 @@ API·약관 설정과 기본 캐릭터가 준비되기 전까지 실제 서비�
 
 ## 외부 로그인과의 경계
 
-신규 소셜 증명은 검증된 제공자 결과의 유효 이메일을 필수로 포함하고 바로 `AGREEMENTS`로 진행한다. 소셜 이메일 보완 API와 `VERIFY_EMAIL` 상태는 제공하지 않는다. 이 변경만으로 외부 인증이나 연결 시작 API를 호출할 수는 없다. 이메일 가입은 별도 제공자 인증 없이 인증·동의·프로필의 모든 단계를 완료할 수 있다.
+이메일 가입은 인증·동의·프로필의 모든 단계를 완료할 수 있다. 외부 로그인과 계정 연결은 별도 변경에서 추가한다.

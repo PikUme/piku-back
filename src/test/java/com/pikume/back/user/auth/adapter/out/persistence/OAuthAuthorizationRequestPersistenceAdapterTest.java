@@ -6,8 +6,7 @@ import org.junit.jupiter.api.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
-import org.springframework.core.io.ClassPathResource;
+import org.flywaydb.core.Flyway;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.*;
 import java.time.Instant;
@@ -28,9 +27,9 @@ class OAuthAuthorizationRequestPersistenceAdapterTest {
     @BeforeEach void setup() {
         var ds = new DriverManagerDataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
         jdbc = new JdbcTemplate(ds);
-        jdbc.execute("DROP TABLE IF EXISTS oauth_authorization_requests");
-        jdbc.execute("DROP TABLE IF EXISTS oauth_start_rate_limits");
-        new ResourceDatabasePopulator(new ClassPathResource("db/migration/V19__create_oauth_authorization_requests.sql")).execute(ds);
+        var schema = Flyway.configure().dataSource(ds).cleanDisabled(false).target("19").load();
+        schema.clean();
+        schema.migrate();
         store = new OAuthAuthorizationRequestPersistenceAdapter(jdbc, new DataSourceTransactionManager(ds));
     }
     OAuthAuthorizationRequest request(String state, String caller) {
