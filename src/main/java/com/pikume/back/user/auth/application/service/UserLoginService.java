@@ -29,7 +29,7 @@ public class UserLoginService implements LoginUseCase {
 		validateEmail(command.email());
 		var user = queryUserIdentityUseCase.queryUserIdentityByEmail(command.email())
 				.orElseThrow(InvalidCredentialsException::new);
-		if (command.password() == null ||
+		if (command.password() == null || user.passwordHash() == null ||
 				!passwordProtectionPort.matches(command.password(), user.passwordHash())) {
 			throw new InvalidCredentialsException();
 		}

@@ -44,6 +44,33 @@ class SignupAuthenticationTest {
                 .isInstanceOf(SignupProofException.class);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.NullAndEmptySource
+    @org.junit.jupiter.params.provider.ValueSource(strings = {" ", "invalid"})
+    void socialProofCannotBeCreatedWithoutAUsableProviderEmail(String email) {
+        assertThatThrownBy(() -> SignupAuthentication.social("token-hash", "caller-hash", "GOOGLE", "Subject", email, NOW))
+                .isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
+    void socialEmailCannotExceedThePersistedEmailLimit() {
+        assertThatThrownBy(() -> SignupAuthentication.social("token-hash", "caller-hash", "GOOGLE", "Subject", "a".repeat(246)+"@gmail.com", NOW))
+                .isInstanceOf(SignupProofException.class);
+    }
+
+    @Test
+    void validProviderEmailIsReadyForConsentWithoutAServiceCode() {
+        var proof = SignupAuthentication.social("token-hash", "caller-hash", "GOOGLE", "CaseSensitiveSubject", "member@naver.com", NOW);
+
+        proof.requireConsentReady();
+
+        assertThat(proof.getVerifiedEmail()).isEqualTo("member@naver.com");
+        assertThat(proof.getEmailVerificationSource()).isEqualTo("PROVIDER");
+        assertThat(proof.getProviderSubject()).isEqualTo("CaseSensitiveSubject");
+        assertThat(proof.getExpiresAt()).isEqualTo(NOW.plusSeconds(600));
+        assertThat(proof.getPasswordHash()).isNull();
+    }
+
     @Test
     void legacyCodeProofCannotSkipPasswordInChapteredConsent() {
         var proof = SignupAuthentication.legacy("token-hash", "caller-hash", "member@gmail.com", NOW);

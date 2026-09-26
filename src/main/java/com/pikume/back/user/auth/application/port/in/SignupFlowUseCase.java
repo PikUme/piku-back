@@ -7,4 +7,5 @@ public interface SignupFlowUseCase {
     SignupProofResult authenticateEmail(EmailSignupAuthenticationCommand command);
     SignupProofResult agree(SignupAgreementCommand command);
     SignupProgress progress(String proof, String callerBinding);
+    SignupProofResult authenticateSocial(SocialSignupAuthenticationCommand command);
 }

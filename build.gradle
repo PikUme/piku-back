@@ -59,6 +59,7 @@ dependencies {
 	implementation 'software.amazon.awssdk:s3'
 	implementation 'software.amazon.awssdk:auth'
 	implementation 'com.github.usefulness:webp-imageio:0.10.2'
+	implementation 'com.google.api-client:google-api-client:2.7.2'
 	implementation('com.google.firebase:firebase-admin:9.9.0') {
 		// Firebase Admin은 FCM 용도로만 사용하고 Firebase Storage XML API는 사용하지 않는다.
 		// jackson-dataformat-xml이 MVC 응답에 영향을 줘 JSON 응답 테스트를 깨뜨리므로 아래와 같이 처리한다.

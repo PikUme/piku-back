@@ -22,6 +22,7 @@ class SignupFlowServiceTest {
     final SignUpUseCase legacy = mock(SignUpUseCase.class);
     final com.pikume.back.user.application.port.out.NicknameHoldPort nicknameHolds = mock(com.pikume.back.user.application.port.out.NicknameHoldPort.class);
     final com.pikume.back.user.application.port.out.CheckUserUniquenessPort uniqueness = mock(com.pikume.back.user.application.port.out.CheckUserUniquenessPort.class);
+    final com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase allowed = mock(com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase.class);
     final Instant now = Instant.now();
     final SignupTransactionPort tx = new SignupTransactionPort() { public <T> T required(Supplier<T> work) { return work.get(); }};
     SignupFlowService service;
@@ -30,13 +31,92 @@ class SignupFlowServiceTest {
         when(policy.enabled()).thenReturn(true);
         when(policy.agreements()).thenReturn(List.of(new SignupAgreementDocument("TERMS", "v1", "actual terms", true)));
         when(character.resolveDefaultSignupCharacter()).thenReturn(9L);
-        var allowed = mock(com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase.class);
         when(allowed.isEmailAllowed(anyString())).thenReturn(true);
         service = new SignupFlowService(store, tx, policy, passwords, mock(IssueVerificationEmailPort.class), character, legacy, new PasswordPolicy(), allowed, nicknameHolds, uniqueness);
         when(store.createUser(any())).thenAnswer(i -> { User u=i.getArgument(0); return new User("u1",u.getEmail(),u.getPassword(),u.getNickname(),u.getCharacterId()); });
     }
     void proof(SignupAuthentication p) { when(store.lockProof(anyString())).thenReturn(Optional.of(p)); }
     SignupAuthentication emailProof() { return SignupAuthentication.email(SignupFlowService.hash("proof"), SignupFlowService.hash("caller"), "new@gmail.com", "once-hashed", now); }
+
+
+    @Test void oldSocialProofWithoutEmailCannotResumeOrCreateAMember() {
+        var pending = SignupAuthentication.social(SignupFlowService.hash("proof"), SignupFlowService.hash("caller"), "GOOGLE", "Subject", "provider@naver.com", now);
+        org.springframework.test.util.ReflectionTestUtils.setField(pending, "verifiedEmail", null);
+        proof(pending);
+
+        assertThatThrownBy(() -> service.progress("proof", "caller"))
+            .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.PROOF_INVALID);
+        assertThatThrownBy(() -> service.agree(new SignupAgreementCommand("proof", "caller", consent)))
+            .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.PROOF_INVALID);
+
+        verify(store, never()).createUser(any());
+        verify(store, never()).recordAgreement(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"member@naver.com,false,false","member@naver.com,true,false","member@gmail.com,false,false","member@workspace.example,true,true"})
+    void providerEmailStartsConsentWithoutServiceEmailVerification(String email,boolean verified,boolean authoritative) {
+        var result=service.authenticateSocial(new SocialSignupAuthenticationCommand("GOOGLE","NewSubject",email,verified,authoritative,"caller",null));
+
+        assertThat(result.progress().nextAction()).isEqualTo(SignupNextAction.AGREEMENTS);
+        assertThat(result.progress().email()).isEqualTo(email);
+        assertThat(result.proof()).isNotBlank();
+        verify(store).saveProof(argThat(p->p.getVerifiedEmail().equals(email)&&p.getEmailVerificationSource().equals("PROVIDER")&&p.getPasswordHash()==null));
+        verify(store,never()).createUser(any());
+        verify(store,never()).createAccount(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.NullAndEmptySource
+    @org.junit.jupiter.params.provider.ValueSource(strings={" "})
+    void missingProviderEmailCreatesNeitherProofNorMember(String email) {
+        assertThatThrownBy(()->service.authenticateSocial(new SocialSignupAuthenticationCommand("GOOGLE","NewSubject",email,false,false,"caller",null)))
+            .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.EMAIL_REQUIRED);
+        verify(store,never()).saveProof(any());
+        verify(store,never()).createUser(any());
+        verify(store,never()).createAccount(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"invalid", "member@blocked.example", "too-long"})
+    void invalidProviderEmailCreatesNeitherProofNorMember(String input) {
+        String email=input.equals("too-long")?"a".repeat(246)+"@gmail.com":input;
+        when(allowed.isEmailAllowed("member@blocked.example")).thenReturn(false);
+        assertThatThrownBy(()->service.authenticateSocial(new SocialSignupAuthenticationCommand("GOOGLE","NewSubject",email,false,false,"caller",null)))
+            .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.INVALID_EMAIL);
+        verify(store,never()).saveProof(any());
+        verify(store,never()).createUser(any());
+        verify(store,never()).createAccount(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,false","false,true","true,false"})
+    void gmailAutomaticLinkStillRequiresBothEmailTrustFacts(boolean verified,boolean authoritative) {
+        when(policy.legacyEmailAccountsVerified()).thenReturn(true);
+        when(store.findUserByEmail("member@gmail.com")).thenReturn(Optional.of(new User("existing","member@gmail.com","password-hash","member",9L)));
+
+        assertThatThrownBy(()->service.authenticateSocial(new SocialSignupAuthenticationCommand("GOOGLE","NewSubject","member@gmail.com",verified,authoritative,"caller",null)))
+            .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.ACCOUNT_LINK_CONFLICT);
+        verify(store,never()).createAccount(any());
+        verify(store,never()).saveProof(any());
+    }
+
+    @Test void externalEmailMatchNeverAutomaticallyLinksEvenWhenProviderMarksItVerified() {
+        when(policy.legacyEmailAccountsVerified()).thenReturn(true);
+        when(store.findUserByEmail("member@naver.com")).thenReturn(Optional.of(new User("existing","member@naver.com","password-hash","member",9L)));
+        assertThatThrownBy(()->service.authenticateSocial(new SocialSignupAuthenticationCommand("GOOGLE","NewSubject","member@naver.com",true,true,"caller",null)))
+            .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.ACCOUNT_LINK_CONFLICT);
+        verify(store,never()).createAccount(any());
+    }
+
+    @Test void explicitReauthenticatedTargetDoesNotNeedProviderEmailForNewAccountLink() {
+        when(store.findUser("target")).thenReturn(Optional.of(new User("target","member@naver.com","hash","member",9L)));
+        var result=service.authenticateSocial(new SocialSignupAuthenticationCommand("GOOGLE","NewSubject",null,false,false,"caller","target"));
+        assertThat(result.progress().userId()).isEqualTo("target");
+        verify(store).createAccount(argThat(a->a.getUserId().equals("target")&&a.getProviderSubject().equals("NewSubject")));
+        verify(store,never()).saveProof(any());
+        verifyNoInteractions(allowed);
+    }
 
     @Test void consentStoresActualVersionedContentAndClearsPasswordHash() {
         var p=emailProof();proof(p);
@@ -59,7 +139,18 @@ class SignupFlowServiceTest {
         assertThatThrownBy(() -> service.agree(new SignupAgreementCommand("proof","caller",consent)))
             .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.EMAIL_ALREADY_REGISTERED);
     }
-
+    @Test void providerSubjectPrecedesChangedEmail() {
+        when(store.findAccount("GOOGLE","Subject")).thenReturn(Optional.of(new UserOAuthAccount("u2","GOOGLE","Subject",now)));
+        when(store.findUser("u2")).thenReturn(Optional.of(new User("u2","old@gmail.com",null,"tester",9L)));
+        assertThat(service.authenticateSocial(new SocialSignupAuthenticationCommand("GOOGLE","Subject","changed@gmail.com",true,true,"caller",null)).progress().userId()).isEqualTo("u2");
+        verify(store,never()).findUserByEmail(anyString());
+    }
+    @Test void socialConsentKeepsPasswordNull() {
+        proof(SignupAuthentication.social(SignupFlowService.hash("proof"),SignupFlowService.hash("caller"),"GOOGLE","Subject","new@gmail.com",now));
+        service.agree(new SignupAgreementCommand("proof","caller",consent));
+        verify(store).createUser(argThat(u -> u.getPassword()==null && u.isProfileSetupRequired() && u.getNickname().equals("new")));
+        verify(store).createAccount(any());
+    }
     @Test void unavailableDefaultCandidatesLeaveProofUnconsumedAndCreateNoUser() {
         var proof=emailProof();proof(proof);
         when(uniqueness.isNicknameInUse(any())).thenReturn(true);
@@ -93,7 +184,42 @@ class SignupFlowServiceTest {
             .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.LEGACY_SIGNUP_DISABLED);
         verifyNoInteractions(legacy);
     }
-
+    @Test void automaticGmailLinkRequiresProvenanceAndKeepsPasswordAccount() {
+        User existing=new User("u2","Name+tag@gmail.com","password-hash","tester",9L);
+        when(store.findUserByEmail("name+tag@gmail.com")).thenReturn(Optional.of(existing));
+        var command=new SocialSignupAuthenticationCommand("GOOGLE","Subject","name+tag@gmail.com",true,true,"caller",null);
+        assertThatThrownBy(() -> service.authenticateSocial(command)).isInstanceOf(SignupFlowException.class)
+                .extracting("reason").isEqualTo(SignupFailure.ACCOUNT_LINK_CONFLICT);
+        when(policy.legacyEmailAccountsVerified()).thenReturn(true);
+        assertThat(service.authenticateSocial(command).progress().userId()).isEqualTo("u2");
+        verify(store).createAccount(argThat(a -> a.getUserId().equals("u2") && a.getProviderSubject().equals("Subject")));
+        assertThat(existing.getPassword()).isEqualTo("password-hash");
+    }
+    @Test void looseDatabaseEmailMatchCannotMergePlusTagsOrDots() {
+        when(policy.legacyEmailAccountsVerified()).thenReturn(true);
+        when(store.findUserByEmail("name+tag@gmail.com")).thenReturn(Optional.of(new User("u2","name@gmail.com","hash","tester",9L)));
+        assertThatThrownBy(() -> service.authenticateSocial(new SocialSignupAuthenticationCommand("GOOGLE","Subject","name+tag@gmail.com",true,true,"caller",null)))
+                .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.ACCOUNT_LINK_CONFLICT);
+        verify(store,never()).createAccount(any());
+    }
+    @Test void explicitTargetMustBeActiveAndCannotReplaceAnotherSubject() {
+        when(store.findUser("u2")).thenReturn(Optional.of(new User("u2","external@example.com","hash","tester",9L)));
+        when(store.findUserAccount("u2","GOOGLE")).thenReturn(Optional.of(new UserOAuthAccount("u2","GOOGLE","OtherSubject",now)));
+        assertThatThrownBy(() -> service.authenticateSocial(new SocialSignupAuthenticationCommand("GOOGLE","Subject",null,false,false,"caller","u2")))
+                .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.ACCOUNT_LINK_CONFLICT);
+        verify(store,never()).createAccount(any());
+    }
+    @Test void existingLinkedUserCanResumeWhileNewSignupIsDisabled() {
+        when(policy.enabled()).thenReturn(false);
+        when(store.findAccount("GOOGLE","Subject")).thenReturn(Optional.of(new UserOAuthAccount("u2","GOOGLE","Subject",now)));
+        when(store.findUser("u2")).thenReturn(Optional.of(new User("u2","old@gmail.com",null,"tester",9L)));
+        assertThat(service.authenticateSocial(new SocialSignupAuthenticationCommand("GOOGLE","Subject",null,false,false,"caller",null)).progress().userId()).isEqualTo("u2");
+    }
+    @Test void unsupportedProviderCannotIssueProofOrFindAnAccount() {
+        assertThatThrownBy(() -> service.authenticateSocial(new SocialSignupAuthenticationCommand("APPLE","Subject",null,false,false,"caller",null)))
+                .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.PROVIDER_NOT_SUPPORTED);
+        verifyNoInteractions(store);
+    }
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings = {"MISSING", "CALLER", "EXPIRED", "CODE", "EXHAUSTED", "CONSUMED"})
     void rejectedEmailChallengeDoesNotHashPassword(String rejection) {

@@ -67,7 +67,7 @@ class SignupJourneyIntegrationTest {
         jdbc.execute("CREATE TABLE IF NOT EXISTS nickname_holds (nickname VARCHAR(255) PRIMARY KEY, user_id VARCHAR(36) NOT NULL UNIQUE, expires_at TIMESTAMP(6) NOT NULL)");
         jdbc.update("MERGE INTO nickname_write_mutex (id) KEY(id) VALUES (1)");
         tx.required(() -> {
-            for(String entity:List.of("UserAgreement","SignupAuthentication","Verification","User","Character","SignupRateLimit","AllowedEmail")) {
+            for(String entity:List.of("UserAgreement","UserOAuthAccount","SignupAuthentication","Verification","User","Character","SignupRateLimit","AllowedEmail")) {
                 em.createQuery("delete from "+entity).executeUpdate();
             }
             jdbc.update("DELETE FROM nickname_holds");

@@ -11,6 +11,8 @@
 
 ## Active Documents
 
+- [Google 로그인 전환 운영](../runbooks/google-login-rollout.md): Google 활성화·등록·암호화 설정과 인증 장애 복구
+
 - [챕터형 회원가입 전환 운영](../runbooks/chapter-signup-rollout.md): 가입 활성화, 스키마·클라이언트 전환과 장애 대응
 
 - [Admin Session Store Runbook](../runbooks/admin-session-store-runbook.md): 관리자 세션 Redis·DB 장애와 전체 세션 폐기 대응 절차

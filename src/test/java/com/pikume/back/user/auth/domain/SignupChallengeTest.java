@@ -21,7 +21,15 @@ class SignupChallengeTest {
   v.activateSignupCode("123456",now);
   assertThat(v.validateSignup("a@gmail.com","caller","123456",now.plusSeconds(300),2)).isEqualTo("CODE_EXPIRED");
  }
-
+ @Test void oldSocialChallengeCannotBecomeAnEmailSignupChallenge() {
+  Instant now=Instant.now();
+  Verification v=Verification.signupChallenge("challenge","a@gmail.com","caller",now,60);
+  org.springframework.test.util.ReflectionTestUtils.setField(v,"signupProofHash","old-social-proof");
+  v.activateSignupCode("123456",now);
+  assertThat(v.validateSignup("a@gmail.com","caller","123456",now,2)).isEqualTo("CHALLENGE_INVALID");
+  assertThat(v.getConsumedAt()).isNull();
+  assertThat(v.getAttempts()).isZero();
+ }
  @Test void attemptsCannotBeResetByTryingCorrectCodeAfterExhaustion() {
   Instant now=Instant.now();
   Verification v=Verification.signupChallenge("challenge","a@gmail.com","caller",now,60);

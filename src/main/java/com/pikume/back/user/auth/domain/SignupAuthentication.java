@@ -30,8 +30,14 @@ public class SignupAuthentication {
     private String flowType;
     @Column(nullable = false, length = 20)
     private String method;
+    @Column(length = 20)
+    private String provider;
+    @Column(length = 255)
+    private String providerSubject;
     private String verifiedEmail;
     private String passwordHash;
+    @Column(length = 20)
+    private String emailVerificationSource;
     private Instant emailVerifiedAt;
     @Column(nullable = false)
     private Instant authenticatedAt;
@@ -69,6 +75,20 @@ public class SignupAuthentication {
         return proof;
     }
 
+    public static SignupAuthentication social(String tokenHash, String callerHash, String provider,
+                                                String subject, String providerEmail, Instant now) {
+        if (provider == null || provider.isBlank() || subject == null || subject.isBlank())
+            throw new SignupProofException(INVALID);
+        var proof = new SignupAuthentication(tokenHash, callerHash, "SOCIAL", now);
+        proof.provider = provider;
+        proof.providerSubject = subject;
+        if (providerEmail == null || providerEmail.isBlank() || providerEmail.length() > 255)
+            throw new SignupProofException(INVALID);
+        proof.verifyEmail(providerEmail, now);
+        proof.emailVerificationSource = "PROVIDER";
+        return proof;
+    }
+
     public void requireUsable(String submittedCallerHash, Instant now) {
         if (submittedCallerHash == null || !MessageDigest.isEqual(
                 callerHash.getBytes(StandardCharsets.UTF_8), submittedCallerHash.getBytes(StandardCharsets.UTF_8)))
@@ -88,6 +108,7 @@ public class SignupAuthentication {
         if (consumedAt != null) throw new SignupProofException(ALREADY_USED);
         this.verifiedEmail = new Email(email).value();
         this.emailVerifiedAt = now;
+        this.emailVerificationSource = "SERVICE";
     }
 
     public void consume(String userId, String fingerprint, Instant now) {

@@ -11,6 +11,7 @@ import com.pikume.back.user.auth.application.dto.SignupConfiguration;
 import com.pikume.back.user.auth.application.dto.SignupNextAction;
 import com.pikume.back.user.auth.application.dto.SignupProgress;
 import com.pikume.back.user.auth.application.dto.SignupProofResult;
+import com.pikume.back.user.auth.application.dto.SocialSignupAuthenticationCommand;
 import com.pikume.back.user.auth.application.exception.SignupFailure;
 import com.pikume.back.user.auth.application.exception.SignupFlowException;
 import com.pikume.back.user.auth.application.port.in.CleanupSignupUseCase;
@@ -28,6 +29,7 @@ import com.pikume.back.user.auth.application.port.out.SignupStorePort;
 import com.pikume.back.user.auth.application.port.out.SignupTransactionPort;
 import com.pikume.back.user.auth.domain.SignupAuthentication;
 import com.pikume.back.user.auth.domain.UserAgreement;
+import com.pikume.back.user.auth.domain.UserOAuthAccount;
 import com.pikume.back.user.auth.domain.Verification;
 import com.pikume.back.user.auth.domain.exception.SignupProofException;
 import com.pikume.back.user.domain.User;
@@ -162,6 +164,56 @@ public class SignupFlowService implements SignupFlowUseCase, QuerySignupAgreemen
     }
 
     @Override
+    public SignupProofResult authenticateSocial(SocialSignupAuthenticationCommand command) {
+        if (!"GOOGLE".equals(command.provider())) throw fail(PROVIDER_NOT_SUPPORTED);
+        requiredHash(command.callerBinding());
+        if (command.subject()==null || command.subject().isBlank() || command.subject().length()>255) throw fail(INVALID_REQUEST);
+        try {
+            return tx(() -> authenticateSocialInTransaction(command));
+        } catch (SignupFlowException conflict) {
+            if (conflict.getReason()!=ACCOUNT_LINK_CONFLICT) throw conflict;
+            // A racing transaction has ended. Only the exact verified subject may recover its linked user.
+            return tx(() -> {
+                var account=store.findAccount(command.provider(), command.subject()).orElseThrow(() -> conflict);
+                if (command.targetUserId()!=null && !command.targetUserId().equals(account.getUserId())) throw conflict;
+                return existingResult(activeUser(account.getUserId()));
+            });
+        }
+    }
+
+    private SignupProofResult authenticateSocialInTransaction(SocialSignupAuthenticationCommand c) {
+        var account = store.findAccount(c.provider(), c.subject());
+        if (account.isPresent()) {
+            if (c.targetUserId()!=null && !c.targetUserId().equals(account.get().getUserId())) throw fail(ACCOUNT_LINK_CONFLICT);
+            return existingResult(activeUser(account.get().getUserId()));
+        }
+        requireEnabled();
+        if (c.targetUserId()!=null) {
+            User target=activeUser(c.targetUserId());
+            link(target.getId(), c.provider(), c.subject(), Instant.now());
+            return existingResult(target);
+        }
+        if (c.email() == null || c.email().isBlank()) throw fail(EMAIL_REQUIRED);
+        String email = validSignupEmail(c.email());
+        var user=store.findUserByEmail(email);
+        if (user.isPresent()) {
+            User existing=user.get();
+            if (existing.isWithdrawn()) throw fail(USER_UNAVAILABLE);
+            // Accepting a provider email for signup does not authorize linking an existing account.
+            if (!c.emailVerified() || !c.emailAuthoritative()
+                || !email.toLowerCase(Locale.ROOT).endsWith("@gmail.com") || !email.equalsIgnoreCase(existing.getEmail())
+                || existing.getPassword()==null || existing.getPassword().isBlank() || !policy.legacyEmailAccountsVerified())
+                throw fail(ACCOUNT_LINK_CONFLICT);
+            link(existing.getId(), c.provider(), c.subject(), Instant.now());
+            return existingResult(existing);
+        }
+        String raw=token();
+        SignupAuthentication proof=SignupAuthentication.social(hash(raw), hash(c.callerBinding()), c.provider(), c.subject(), email, Instant.now());
+        store.saveProof(proof);
+        return new SignupProofResult(raw, proofProgress(proof));
+    }
+
+    @Override
     public SignupProofResult agree(SignupAgreementCommand command) {
         requireEnabled();
         String fingerprint=fingerprint(command.agreements());
@@ -170,6 +222,8 @@ public class SignupFlowService implements SignupFlowUseCase, QuerySignupAgreemen
                 return tx(() -> agreeInTransaction(command, fingerprint));
             } catch (SignupFlowException error) {
                 if (error.getReason()==NICKNAME_COLLISION && attempt<2) continue;
+                if (error.getReason()==EMAIL_ALREADY_REGISTERED || error.getReason()==ACCOUNT_LINK_CONFLICT)
+                return recoverSocialConsent(command, fingerprint, error);
                 throw error;
             }
         }
@@ -185,6 +239,10 @@ public class SignupFlowService implements SignupFlowUseCase, QuerySignupAgreemen
         proof.requireConsentReady();
         String completed=proof.completedUser(fingerprint, now);
         if (completed!=null) return new SignupProofResult(command.proof(), userProgress(activeUser(completed), proof.getExpiresAt()));
+        if ("SOCIAL".equals(proof.getMethod())) {
+            var account=store.findAccount(proof.getProvider(), proof.getProviderSubject());
+            if (account.isPresent()) return consumeForLinkedUser(command.proof(), proof, account.get(), fingerprint, now);
+        }
         List<SignupAgreementDocument> documents=validateAgreements(command.agreements());
         validSignupEmail(proof.getVerifiedEmail());
         if (store.findUserByEmail(proof.getVerifiedEmail()).isPresent()) throw fail(EMAIL_ALREADY_REGISTERED);
@@ -196,6 +254,7 @@ public class SignupFlowService implements SignupFlowUseCase, QuerySignupAgreemen
             SignupAgreementDocument d=documents.stream().filter(v -> v.type().equals(acceptance.type())).findFirst().orElseThrow();
             store.recordAgreement(new UserAgreement(user.getId(), d.type(), d.version(), d.content(), acceptance.agreed(), now));
         }
+        if ("SOCIAL".equals(proof.getMethod())) link(user.getId(), proof.getProvider(), proof.getProviderSubject(), now);
         proof.consume(user.getId(), fingerprint, now);
         return new SignupProofResult(command.proof(), new SignupProgress(SignupNextAction.PROFILE, user.getEmail(), user.getId(), "REQUIRED", proof.getExpiresAt()));
     }
@@ -207,6 +266,21 @@ public class SignupFlowService implements SignupFlowUseCase, QuerySignupAgreemen
             if(!userUniqueness.isNicknameInUse(candidate) && !nicknameHolds.isHeld(candidate,Instant.now())) return candidate;
         }
         throw fail(NICKNAME_COLLISION);
+    }
+
+    private SignupProofResult recoverSocialConsent(SignupAgreementCommand c, String fingerprint, SignupFlowException original) {
+        return tx(() -> {
+            SignupAuthentication proof=loadProof(c.proof(), c.callerBinding());Instant now=Instant.now();
+            if (!"SOCIAL".equals(proof.getMethod())) throw original;
+            UserOAuthAccount account=store.findAccount(proof.getProvider(), proof.getProviderSubject()).orElseThrow(() -> original);
+            return consumeForLinkedUser(c.proof(), proof, account, fingerprint, now);
+        });
+    }
+
+    private SignupProofResult consumeForLinkedUser(String raw, SignupAuthentication proof, UserOAuthAccount account, String fingerprint, Instant now) {
+        User user=activeUser(account.getUserId());
+        proof.consume(user.getId(), fingerprint, now);
+        return new SignupProofResult(raw, userProgress(user, proof.getExpiresAt()));
     }
 
     private List<SignupAgreementDocument> validateAgreements(List<AgreementAcceptance> acceptances) {
@@ -266,6 +340,15 @@ public class SignupFlowService implements SignupFlowUseCase, QuerySignupAgreemen
         store.purgeExpired(Instant.now());
     }
 
+    private void link(String userId, String provider, String subject, Instant now) {
+        var current=store.findUserAccount(userId, provider);
+        if (current.isPresent()) {
+            if (!current.get().getProviderSubject().equals(subject)) throw fail(ACCOUNT_LINK_CONFLICT);
+            return;
+        }
+        store.createAccount(new UserOAuthAccount(userId, provider, subject, now));
+    }
+
     private SignupAuthentication loadProof(String raw, String caller) {
         var proof=store.lockProof(requiredHash(raw)).orElseThrow(() -> fail(PROOF_INVALID));
         proof.requireUsable(requiredHash(caller), Instant.now());
@@ -282,6 +365,12 @@ public class SignupFlowService implements SignupFlowUseCase, QuerySignupAgreemen
         User user=store.findUser(id).orElseThrow(() -> fail(USER_UNAVAILABLE));
         if (user.isWithdrawn()) throw fail(USER_UNAVAILABLE);
         return user;
+    }
+
+
+
+    private SignupProofResult existingResult(User u) {
+        return new SignupProofResult(null, userProgress(u, null));
     }
 
     private SignupProgress userProgress(User u, Instant expiresAt) {

@@ -20,6 +20,7 @@ class UserSessionIssuerTest {
     @Mock QueryUserIdentityUseCase identities;
     @Mock AuthenticationTokenPort tokens;
     @Mock RefreshSessionPort sessions;
+    @Mock PasswordProtectionPort passwords;
     @InjectMocks UserSessionIssuer service;
 
     @Test void pendingMemberCanResumeWithNormalSession() {
@@ -46,5 +47,18 @@ class UserSessionIssuerTest {
         then(tokens).shouldHaveNoInteractions();
         then(access).shouldHaveNoInteractions();
     }
-
+    @Test void socialOnlyUserCannotUsePasswordReauthentication() {
+        given(access.queryUserAccess("user")).willReturn(Optional.of(new UserAccessView("user",false,UserAccessProfileStatus.COMPLETED)));
+        given(identities.queryUserIdentityById("user")).willReturn(Optional.of(new UserIdentityView("user",null,"nick",null)));
+        assertThatThrownBy(() -> service.reauthenticate("user", "password")).isInstanceOf(InvalidCredentialsException.class);
+        then(passwords).shouldHaveNoInteractions();
+        then(tokens).shouldHaveNoInteractions();
+    }
+    @Test void successfulReauthenticationDoesNotIssueSession() {
+        given(access.queryUserAccess("user")).willReturn(Optional.of(new UserAccessView("user",false,UserAccessProfileStatus.COMPLETED)));
+        given(identities.queryUserIdentityById("user")).willReturn(Optional.of(new UserIdentityView("user","hash","nick",null)));
+        given(passwords.matches("password","hash")).willReturn(true);
+        service.reauthenticate("user", "password");
+        then(tokens).shouldHaveNoInteractions();
+    }
 }
