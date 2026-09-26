@@ -10,7 +10,7 @@ public final class DefaultSignupNicknamePolicy {
 	public static Nickname candidate(String verifiedEmail,int numericSuffix) {
 		int separator=verifiedEmail.lastIndexOf('@');
 		String localPart=separator<0?"":verifiedEmail.substring(0,separator).strip();
-		if(localPart.isEmpty() || localPart.startsWith("가입대기_")) localPart="사용자";
+		if(localPart.isEmpty()) localPart="사용자";
 		String suffix=numericSuffix==0?"":Integer.toString(numericSuffix);
 		int end=Math.min(localPart.length(),20-suffix.length());
 		if(end>0 && Character.isHighSurrogate(localPart.charAt(end-1))) end--;

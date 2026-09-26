@@ -25,7 +25,7 @@ class UserSessionIssuerTest {
 
     @Test void pendingMemberCanResumeWithNormalSession() {
         given(access.queryUserAccess("user")).willReturn(Optional.of(new UserAccessView("user", false, UserAccessProfileStatus.REQUIRED)));
-        given(identities.queryUserIdentityById("user")).willReturn(Optional.of(new UserIdentityView("user", null,"가입대기_ab",new UserAvatarReference("base.webp",false,true))));
+        given(identities.queryUserIdentityById("user")).willReturn(Optional.of(new UserIdentityView("user", null,"user",new UserAvatarReference("base.webp",false,true))));
         given(tokens.generateAccessToken("user")).willReturn("access");
         given(tokens.generateRefreshToken()).willReturn("refresh");
         var result = service.issueSession("user", "device");

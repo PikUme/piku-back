@@ -12,7 +12,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @DisplayName("User")
 class UserTest {
 
-	private static final String TEMPORARY_NICKNAME = "가입대기_abc123";
+	private static final String DEFAULT_NICKNAME = "user";
 
 	@Test
 	@DisplayName("이메일과 닉네임은 값 객체로, 아바타는 캐릭터 식별자로 보유한다")
@@ -55,13 +55,13 @@ class UserTest {
 	}
 
 	@Test
-	@DisplayName("완료 사용자는 가입 대기 접두사가 붙은 닉네임으로 변경할 수 없다")
-	void completedUserCannotChangeToReservedNickname() {
-		User user = new User("user@example.com", "password", "nickname", 1L);
+	@DisplayName("완료 사용자는 일반 닉네임 규칙에 맞는 값으로 변경할 수 있다")
+	void completedUserCanChangeNickname() {
+		User user = new User("user@example.com", "password", "user", 1L);
 
-		assertThatThrownBy(() -> user.changeNickname("가입대기_changed"))
-				.isInstanceOf(IllegalArgumentException.class);
-		assertThat(user.getNickname()).isEqualTo("nickname");
+		user.changeNickname(" renamed ");
+
+		assertThat(user.getNickname()).isEqualTo("renamed");
 	}
 
 	@Test
@@ -143,7 +143,7 @@ class UserTest {
 	@Test
 	@DisplayName("가입 대기 사용자는 프로필 설정 필요 상태로 생성된다")
 	void pendingFactoryCreatesRequiredUser() {
-		User user = User.pending("user@example.com", null, TEMPORARY_NICKNAME, 1L);
+		User user = User.pending("user@example.com", null, DEFAULT_NICKNAME, 1L);
 
 		assertThat(user.getProfileSetupStatus()).isEqualTo(ProfileSetupStatus.REQUIRED);
 		assertThat(user.isProfileSetupRequired()).isTrue();
@@ -153,7 +153,7 @@ class UserTest {
 	@Test
 	@DisplayName("가입 대기 사용자는 초기 기본 캐릭터를 최종 선택해도 프로필을 완료할 수 있다")
 	void completesProfileWithSameDefaultCharacter() {
-		User user = User.pending("user@example.com", "password", TEMPORARY_NICKNAME, 1L);
+		User user = User.pending("user@example.com", "password", DEFAULT_NICKNAME, 1L);
 
 		user.completeProfile("final-nickname", 1L);
 
@@ -163,13 +163,13 @@ class UserTest {
 	}
 
 	@Test
-	@DisplayName("이미 완료된 기존 사용자는 가입 대기 접두사 닉네임도 동일 값으로 완료 재요청할 수 있다")
-	void completedLegacyUserAcceptsIdempotentCompletion() {
-		User user = new User("user@example.com", "password", TEMPORARY_NICKNAME, 1L);
+	@DisplayName("이미 완료된 사용자는 동일 값으로 완료 재요청할 수 있다")
+	void completedUserAcceptsIdempotentCompletion() {
+		User user = new User("user@example.com", "password", DEFAULT_NICKNAME, 1L);
 
-		user.completeProfile(TEMPORARY_NICKNAME, 1L);
+		user.completeProfile(DEFAULT_NICKNAME, 1L);
 
-		assertThat(user.getNickname()).isEqualTo(TEMPORARY_NICKNAME);
+		assertThat(user.getNickname()).isEqualTo(DEFAULT_NICKNAME);
 		assertThat(user.getCharacterId()).isEqualTo(1L);
 		assertThat(user.getProfileSetupStatus()).isEqualTo(ProfileSetupStatus.COMPLETED);
 	}
@@ -197,21 +197,21 @@ class UserTest {
 	}
 
 	@Test
-	@DisplayName("가입 대기 접두사가 붙은 닉네임으로는 프로필을 완료할 수 없다")
-	void rejectsTemporaryNicknameAsFinalNickname() {
-		User user = User.pending("user@example.com", "password", TEMPORARY_NICKNAME, 1L);
+	@DisplayName("기본 닉네임을 유지하고 프로필을 완료할 수 있다")
+	void completesProfileWithDefaultNickname() {
+		User user = User.pending("user@example.com", "password", DEFAULT_NICKNAME, 1L);
 
-		assertThatThrownBy(() -> user.completeProfile("가입대기_final", 2L))
-				.isInstanceOf(IllegalArgumentException.class);
-		assertThat(user.isProfileSetupRequired()).isTrue();
-		assertThat(user.getNickname()).isEqualTo(TEMPORARY_NICKNAME);
-		assertThat(user.getCharacterId()).isEqualTo(1L);
+		user.completeProfile(DEFAULT_NICKNAME, 2L);
+
+		assertThat(user.isProfileSetupRequired()).isFalse();
+		assertThat(user.getNickname()).isEqualTo(DEFAULT_NICKNAME);
+		assertThat(user.getCharacterId()).isEqualTo(2L);
 	}
 
 	@Test
 	@DisplayName("탈퇴 사용자는 프로필을 완료할 수 없다")
 	void withdrawnUserCannotCompleteProfile() {
-		User user = User.pending("user@example.com", "password", TEMPORARY_NICKNAME, 1L);
+		User user = User.pending("user@example.com", "password", DEFAULT_NICKNAME, 1L);
 		user.withdraw();
 
 		assertThatThrownBy(() -> user.completeProfile("final-nickname", 2L))
@@ -222,7 +222,7 @@ class UserTest {
 	@Test
 	@DisplayName("일반 프로필 변경은 가입 대기 상태를 완료로 바꾸지 않는다")
 	void ordinaryProfileChangesDoNotCompletePendingUser() {
-		User user = User.pending("user@example.com", "password", TEMPORARY_NICKNAME, 1L);
+		User user = User.pending("user@example.com", "password", DEFAULT_NICKNAME, 1L);
 
 		user.changeNickname("ordinary-change");
 		user.changeCharacter(2L);
