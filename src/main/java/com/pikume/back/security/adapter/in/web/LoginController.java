@@ -82,7 +82,7 @@ public class LoginController {
 			return ResponseEntity.ok()
 					.header(HttpHeaders.AUTHORIZATION,
 							AuthWebConstants.BEARER_PREFIX + loginResult.accessToken())
-					.header(HttpHeaders.SET_COOKIE, responseCookie.toString())
+					.header(HttpHeaders.SET_COOKIE, responseCookie.toString(), SignupProofCookie.expired().toString())
 					.body(loginResponse);
 		} catch (InvalidCredentialsException e) {
 			log.warn("event=login_failed outcome=denied reason=invalid_credentials");
@@ -150,7 +150,7 @@ public class LoginController {
 		ResponseCookie deleteCookie = deleteRefreshCookie();
 
 		return ResponseEntity.ok()
-				.header(HttpHeaders.SET_COOKIE, deleteCookie.toString())
+				.header(HttpHeaders.SET_COOKIE, deleteCookie.toString(), SignupProofCookie.expired().toString())
 				.body(new MessageResponse("로그아웃 완료"));
 	}
 

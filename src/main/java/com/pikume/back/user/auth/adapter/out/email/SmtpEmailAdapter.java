@@ -13,7 +13,7 @@ import com.pikume.back.user.auth.application.exception.AuthErrorCode;
 import com.pikume.back.user.auth.application.exception.AuthException;
 
 import java.io.UnsupportedEncodingException;
-import java.util.Random;
+import java.security.SecureRandom;
 
 @Component
 @RequiredArgsConstructor
@@ -51,7 +51,7 @@ public class SmtpEmailAdapter implements IssueVerificationEmailPort {
 	}
 
 	private String createVerificationCode() {
-		Random random = new Random();
+		SecureRandom random = new SecureRandom();
 		int code = 100000 + random.nextInt(900000);
 		return String.valueOf(code);
 	}

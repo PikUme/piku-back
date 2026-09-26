@@ -23,7 +23,9 @@ public class UserReferenceQueryService implements QueryUserReferenceUseCase {
 
 	@Override
 	public Optional<UserReferenceView> queryUserReference(String userId) {
-		return loadUserReferencePort.loadReference(userId).map(this::toReferenceView);
+		return loadUserReferencePort.loadReference(userId)
+				.filter(user -> !user.isProfileSetupRequired())
+				.map(this::toReferenceView);
 	}
 
 	private UserReferenceView toReferenceView(User user) {

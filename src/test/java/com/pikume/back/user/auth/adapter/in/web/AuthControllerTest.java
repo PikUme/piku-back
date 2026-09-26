@@ -49,7 +49,9 @@ class AuthControllerTest {
 	private AuthController authController;
 
 	@Mock
-	private SignUpUseCase signUpUseCase;
+	private com.pikume.back.user.auth.application.port.in.LegacySignupProofUseCase legacySignup;
+    @Mock private com.pikume.back.user.auth.application.port.in.QuerySignupConfigurationUseCase signupConfiguration;
+    @Mock private SignupWebCredentials credentials;
 
 	@Mock
 	private VerifyEmailUseCase verifyEmailUseCase;
@@ -66,18 +68,26 @@ class AuthControllerTest {
 	@BeforeEach
 	void setUp() {
 		authController = new AuthController(
-				signUpUseCase,
+				legacySignup,
 				verifyEmailUseCase,
 				resetPasswordUseCase,
-				queryAllowedEmailUseCase);
-		ProblemDetailFactory problemDetailFactory = new ProblemDetailFactory();
+				queryAllowedEmailUseCase, signupConfiguration, credentials);
+		org.mockito.Mockito.lenient().when(signupConfiguration.querySignupConfiguration()).thenReturn(new com.pikume.back.user.auth.application.dto.SignupConfiguration(false,true));
+        org.mockito.Mockito.lenient().when(credentials.requireBinding(any())).thenReturn("binding");
+        org.mockito.Mockito.lenient().when(credentials.requireProof(any())).thenReturn("proof");
+        org.mockito.Mockito.lenient().when(legacySignup.issueLegacyProof(any(),any())).thenReturn(
+            new com.pikume.back.user.auth.application.dto.SignupProofResult("proof",
+                new com.pikume.back.user.auth.application.dto.SignupProgress(
+                    com.pikume.back.user.auth.application.dto.SignupNextAction.AGREEMENTS,"user@example.com",null,null,
+                    java.time.Instant.now().plusSeconds(600))));
+        ProblemDetailFactory problemDetailFactory = new ProblemDetailFactory();
 		LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
 		validator.afterPropertiesSet();
 		mockMvc = MockMvcBuilders.standaloneSetup(authController)
 				.setControllerAdvice(
 						new GlobalExceptionHandler(Optional.empty(), problemDetailFactory),
 						new AuthExceptionHandler(problemDetailFactory),
-						new UserExceptionHandler(problemDetailFactory))
+						new UserExceptionHandler(problemDetailFactory), new SignupExceptionHandler(problemDetailFactory))
 				.setValidator(validator)
 				.build();
 	}
@@ -253,7 +263,7 @@ class AuthControllerTest {
 	@DisplayName("POST /api/auth/signup은 성공 시 MessageResponse를 반환한다")
 	void signupReturnsMessageResponseWhenSuccessful() throws Exception {
 		SignupRequest request = new SignupRequest("user@example.com", "abc@123", "pikume", 1L);
-		doNothing().when(signUpUseCase).signUp(any(SignUpCommand.class));
+		doNothing().when(legacySignup).completeLegacy(any(SignUpCommand.class), any(), any());
 
 		mockMvc.perform(post("/api/auth/signup")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -272,8 +282,7 @@ class AuthControllerTest {
 						.content(objectMapper.writeValueAsString(request)))
 				.andExpect(status().isCreated());
 
-		then(signUpUseCase).should().signUp(
-				new SignUpCommand("PRIVATE-INVALID-EMAIL", "abc@123", "pikume", 1L));
+		then(legacySignup).should().completeLegacy(new SignUpCommand("PRIVATE-INVALID-EMAIL", "abc@123", "pikume", 1L), "proof", "binding");
 	}
 
 	@Test
@@ -288,7 +297,7 @@ class AuthControllerTest {
 				.andExpect(jsonPath("$.status").value(400))
 				.andExpect(jsonPath("$.fieldErrors.email").exists());
 
-		then(signUpUseCase).shouldHaveNoInteractions();
+		then(legacySignup).shouldHaveNoInteractions();
 	}
 
 	@Test
@@ -303,7 +312,7 @@ class AuthControllerTest {
 				.andExpect(jsonPath("$.status").value(400))
 				.andExpect(jsonPath("$.fieldErrors.password").exists());
 
-		then(signUpUseCase).shouldHaveNoInteractions();
+		then(legacySignup).shouldHaveNoInteractions();
 	}
 
 	@Test
@@ -316,8 +325,7 @@ class AuthControllerTest {
 						.content(objectMapper.writeValueAsString(request)))
 				.andExpect(status().isCreated());
 
-		then(signUpUseCase).should().signUp(
-				new SignUpCommand("user@example.com", "plainPassword", "pikume", 1L));
+		then(legacySignup).should().completeLegacy(new SignUpCommand("user@example.com", "plainPassword", "pikume", 1L), "proof", "binding");
 	}
 
 	@Test
@@ -330,8 +338,8 @@ class AuthControllerTest {
 						.content(objectMapper.writeValueAsString(request)))
 				.andExpect(status().isCreated());
 
-		then(signUpUseCase).should().signUp(
-				new SignUpCommand("user@example.com", "abc@123", " 12345678901234567890 ", 1L));
+		then(legacySignup).should().completeLegacy(
+				new SignUpCommand("user@example.com", "abc@123", " 12345678901234567890 ", 1L), "proof", "binding");
 	}
 
 	@Test
@@ -339,8 +347,8 @@ class AuthControllerTest {
 	void signupReturnsProblemDetailWhenAuthExceptionOccurs() throws Exception {
 		SignupRequest request = new SignupRequest("user@example.com", "abc@123", "pikume", 1L);
 		willThrow(new AuthException(AuthErrorCode.EMAIL_ALREADY_EXISTS))
-				.given(signUpUseCase)
-				.signUp(any(SignUpCommand.class));
+				.given(legacySignup)
+				.completeLegacy(any(SignUpCommand.class), any(), any());
 
 		mockMvc.perform(post("/api/auth/signup")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -358,8 +366,8 @@ class AuthControllerTest {
 	void signupReturnsInvalidEmailProblemDetail() throws Exception {
 		SignupRequest request = new SignupRequest("user@example.com", "abc@123", "pikume", 1L);
 		willThrow(new AuthException(AuthErrorCode.INVALID_EMAIL))
-				.given(signUpUseCase)
-				.signUp(any(SignUpCommand.class));
+				.given(legacySignup)
+				.completeLegacy(any(SignUpCommand.class), any(), any());
 
 		mockMvc.perform(post("/api/auth/signup")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -376,8 +384,8 @@ class AuthControllerTest {
 	void signupReturnsInvalidPasswordProblemDetail() throws Exception {
 		SignupRequest request = new SignupRequest("user@example.com", "abc@123", "pikume", 1L);
 		willThrow(new AuthException(AuthErrorCode.INVALID_PASSWORD))
-				.given(signUpUseCase)
-				.signUp(any(SignUpCommand.class));
+				.given(legacySignup)
+				.completeLegacy(any(SignUpCommand.class), any(), any());
 
 		mockMvc.perform(post("/api/auth/signup")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -394,8 +402,8 @@ class AuthControllerTest {
 	void signupReturnsProblemDetailWhenFixedCharacterNotFound() throws Exception {
 		SignupRequest request = new SignupRequest("user@example.com", "abc@123", "pikume", 999L);
 		willThrow(new AuthException(AuthErrorCode.FIXED_CHARACTER_NOT_FOUND))
-				.given(signUpUseCase)
-				.signUp(any(SignUpCommand.class));
+				.given(legacySignup)
+				.completeLegacy(any(SignUpCommand.class), any(), any());
 
 		mockMvc.perform(post("/api/auth/signup")
 						.contentType(MediaType.APPLICATION_JSON)

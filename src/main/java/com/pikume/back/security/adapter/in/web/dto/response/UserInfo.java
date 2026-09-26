@@ -11,4 +11,14 @@ public class UserInfo {
 	private String id;
 	private String nickname;
 	private String avatarUrl;
+	private String profileSetupStatus;
+	private Long characterId;
+
+	public UserInfo(String id, String nickname, String avatarUrl, String profileSetupStatus) {
+		this(id, nickname, avatarUrl, profileSetupStatus, null);
+	}
+
+	public UserInfo(String id, String nickname, String avatarUrl) {
+		this(id, nickname, avatarUrl, "COMPLETED");
+	}
 }

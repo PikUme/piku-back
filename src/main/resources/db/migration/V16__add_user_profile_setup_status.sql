@@ -1,0 +1,2 @@
+ALTER TABLE users
+  ADD COLUMN profile_setup_status VARCHAR(20) NOT NULL DEFAULT 'COMPLETED';

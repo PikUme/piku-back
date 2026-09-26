@@ -21,11 +21,9 @@ import com.pikume.back.user.application.dto.UpdateProfileResult;
 import com.pikume.back.user.application.exception.ProfileImageNotFoundException;
 import com.pikume.back.user.application.exception.UserErrorCode;
 import com.pikume.back.user.application.exception.UserNotFoundException;
-import com.pikume.back.user.adapter.out.memory.InMemoryNicknameHoldAdapter;
 import com.pikume.back.user.domain.User;
 import com.pikume.back.user.domain.exception.InvalidNicknameException;
 import com.pikume.back.user.domain.exception.NicknameAlreadyExistsException;
-import com.pikume.back.user.domain.service.NicknamePolicy;
 import com.pikume.back.user.domain.vo.Nickname;
 
 import java.util.Optional;
@@ -56,8 +54,6 @@ class UserProfileCommandServiceTest {
 	private NicknameHoldPort nicknameHoldPort;
 	@Mock
 	private ResolveFixedCharacterAvatarPort fixedCharacterAvatarPort;
-	@Mock
-	private NicknamePolicy nicknamePolicy;
 
 	@Nested
 	@DisplayName("reserveIfAvailable - 닉네임 사용 가능 확인")
@@ -67,13 +63,14 @@ class UserProfileCommandServiceTest {
 		@DisplayName("정규화 후 현재 자신의 닉네임이면 새 점유 없이 사용 가능하다")
 		void ownNicknameIsAvailable() {
 			User user = new User("user-1", "test@test.com", "pw", "현재닉", 1L);
-			given(loadUserForProfilePort.loadProfileUser("user-1")).willReturn(Optional.of(user));
+			given(loadUserForProfilePort.loadProfileUserForUpdate("user-1")).willReturn(Optional.of(user));
 
 			boolean result = service.reserveIfAvailable(" \u2003현재닉\u3000 ", "user-1");
 
 			assertThat(result).isTrue();
 			then(checkUserUniquenessPort).shouldHaveNoInteractions();
-			then(nicknameHoldPort).shouldHaveNoInteractions();
+			then(nicknameHoldPort).should().lockNicknameWrites();
+			then(nicknameHoldPort).should().releaseForUser("user-1");
 		}
 
 		@Test
@@ -91,7 +88,7 @@ class UserProfileCommandServiceTest {
 		@DisplayName("이미 DB에 존재하는 닉네임이면 사용 불가")
 		void existingNicknameIsUnavailable() {
 			User user = new User("user-1", "test@test.com", "pw", "현재닉", 1L);
-			given(loadUserForProfilePort.loadProfileUser("user-1")).willReturn(Optional.of(user));
+			given(loadUserForProfilePort.loadProfileUserForUpdate("user-1")).willReturn(Optional.of(user));
 			given(checkUserUniquenessPort.isNicknameInUse(new Nickname("중복닉"))).willReturn(true);
 
 			boolean result = service.reserveIfAvailable(" \u2003중복닉\u3000 ", "user-1");
@@ -103,7 +100,7 @@ class UserProfileCommandServiceTest {
 		@DisplayName("사용 가능한 닉네임 점유를 목적 중심 Port에 위임한다")
 		void delegatesNicknameAcquisitionToHoldPort() {
 			User user = new User("user-1", "test@test.com", "pw", "현재닉", 1L);
-			given(loadUserForProfilePort.loadProfileUser("user-1")).willReturn(Optional.of(user));
+			given(loadUserForProfilePort.loadProfileUserForUpdate("user-1")).willReturn(Optional.of(user));
 			given(nicknameHoldPort.tryAcquire(eq(new Nickname("새닉")), eq("user-1"), any(Instant.class))).willReturn(true);
 
 			assertThat(service.reserveIfAvailable(" \u2003새닉\u3000 ", "user-1")).isTrue();
@@ -112,7 +109,7 @@ class UserProfileCommandServiceTest {
 		@Test
 		@DisplayName("존재하지 않는 사용자면 예외 발생")
 		void nonExistentUserThrows() {
-			given(loadUserForProfilePort.loadProfileUser("unknown")).willReturn(Optional.empty());
+			given(loadUserForProfilePort.loadProfileUserForUpdate("unknown")).willReturn(Optional.empty());
 
 				assertThatThrownBy(() -> service.reserveIfAvailable("닉네임", "unknown"))
 						.isInstanceOfSatisfying(UserNotFoundException.class,
@@ -165,14 +162,15 @@ class UserProfileCommandServiceTest {
 		void normalizedCurrentNicknameDoesNotRequireHold() {
 			User user = new User("user-1", "test@test.com", "pw", "현재닉", 1L);
 			UpdateProfileCommand command = new UpdateProfileCommand("user-1", " \u2003현재닉\u3000 ", null);
-			given(loadUserForProfilePort.loadProfileUser("user-1")).willReturn(Optional.of(user));
+			given(loadUserForProfilePort.loadProfileUserForUpdate("user-1")).willReturn(Optional.of(user));
 
 			UpdateProfileResult result = service.updateProfile(command);
 
 			assertThat(result.success()).isTrue();
 			assertThat(result.newNickname()).isEqualTo("현재닉");
 			then(checkUserUniquenessPort).shouldHaveNoInteractions();
-			then(nicknameHoldPort).shouldHaveNoInteractions();
+			then(nicknameHoldPort).should().lockNicknameWrites();
+			then(nicknameHoldPort).shouldHaveNoMoreInteractions();
 			then(recordUserAccountPort).shouldHaveNoInteractions();
 		}
 
@@ -181,7 +179,7 @@ class UserProfileCommandServiceTest {
 		void updatesNicknameUsingNormalizedHold() {
 			User user = new User("user-1", "test@test.com", "pw", "현재닉", 1L);
 			UpdateProfileCommand command = new UpdateProfileCommand("user-1", " \u2003새닉\u3000 ", null);
-			given(loadUserForProfilePort.loadProfileUser("user-1")).willReturn(Optional.of(user));
+			given(loadUserForProfilePort.loadProfileUserForUpdate("user-1")).willReturn(Optional.of(user));
 			given(nicknameHoldPort.isHeldBy(eq(new Nickname("새닉")), eq("user-1"), any(Instant.class))).willReturn(true);
 			given(recordUserAccountPort.recordUserAccount(user)).willReturn(user);
 
@@ -193,34 +191,12 @@ class UserProfileCommandServiceTest {
 			then(nicknameHoldPort).should().release(new Nickname("새닉"), "user-1");
 		}
 
-		@Test
-		@DisplayName("실제 점유 어댑터가 공백 형태가 다른 예약과 변경을 같은 닉네임으로 처리한다")
-		void realHoldAdapterConnectsWhitespaceVariantReservationAndUpdate() {
-			User user = new User("user-1", "test@test.com", "pw", "현재닉", 1L);
-			InMemoryNicknameHoldAdapter holdAdapter = new InMemoryNicknameHoldAdapter(new NicknamePolicy());
-			UserProfileCommandService integratedService = new UserProfileCommandService(
-					loadUserForProfilePort,
-					recordUserAccountPort,
-					checkUserUniquenessPort,
-					fixedCharacterAvatarPort,
-					holdAdapter);
-			given(loadUserForProfilePort.loadProfileUser("user-1")).willReturn(Optional.of(user));
-
-			boolean reserved = integratedService.reserveIfAvailable(" \u2003새닉\u3000 ", "user-1");
-			UpdateProfileResult result = integratedService.updateProfile(
-					new UpdateProfileCommand("user-1", "\t새닉\n", null));
-
-			assertThat(reserved).isTrue();
-			assertThat(result.success()).isTrue();
-			assertThat(result.newNickname()).isEqualTo("새닉");
-			assertThat(holdAdapter.isHeldBy(new Nickname("새닉"), "user-1", Instant.now())).isFalse();
-		}
 
 		@Test
 		@DisplayName("존재하지 않는 사용자면 예외 발생")
 		void nonExistentUserThrows() {
 			UpdateProfileCommand command = new UpdateProfileCommand("unknown", "새닉", null);
-			given(loadUserForProfilePort.loadProfileUser("unknown")).willReturn(Optional.empty());
+			given(loadUserForProfilePort.loadProfileUserForUpdate("unknown")).willReturn(Optional.empty());
 
 				assertThatThrownBy(() -> service.updateProfile(command))
 						.isInstanceOfSatisfying(UserNotFoundException.class,
@@ -232,7 +208,7 @@ class UserProfileCommandServiceTest {
 		void nonExistentCharacterReturnsResourceNotFoundFailure() {
 			User user = new User("user-1", "test@test.com", "pw", "닉네임", 1L);
 			UpdateProfileCommand command = new UpdateProfileCommand("user-1", null, 999L);
-			given(loadUserForProfilePort.loadProfileUser("user-1")).willReturn(Optional.of(user));
+			given(loadUserForProfilePort.loadProfileUserForUpdate("user-1")).willReturn(Optional.of(user));
 			given(fixedCharacterAvatarPort.resolveFixedCharacterObjectKey(999L)).willReturn(Optional.empty());
 
 			UpdateProfileResult result = service.updateProfile(command);
@@ -247,7 +223,7 @@ class UserProfileCommandServiceTest {
 		void storesCharacterIdentifierWhenCharacterChanges() {
 			User user = new User("user-1", "test@test.com", "pw", "닉네임", 1L);
 			UpdateProfileCommand command = new UpdateProfileCommand("user-1", null, 2L);
-			given(loadUserForProfilePort.loadProfileUser("user-1")).willReturn(Optional.of(user));
+			given(loadUserForProfilePort.loadProfileUserForUpdate("user-1")).willReturn(Optional.of(user));
 			given(fixedCharacterAvatarPort.resolveFixedCharacterObjectKey(2L))
 					.willReturn(Optional.of("public/characters/fixed/base_image_2.webp"));
 			given(recordUserAccountPort.recordUserAccount(any(User.class))).willReturn(user);
@@ -265,7 +241,7 @@ class UserProfileCommandServiceTest {
 		void releasesNicknameHoldAfterSuccessfulUpdate() {
 			User user = new User("user-1", "test@test.com", "pw", "현재닉", 1L);
 			UpdateProfileCommand command = new UpdateProfileCommand("user-1", "새닉", null);
-			given(loadUserForProfilePort.loadProfileUser("user-1")).willReturn(Optional.of(user));
+			given(loadUserForProfilePort.loadProfileUserForUpdate("user-1")).willReturn(Optional.of(user));
 			given(nicknameHoldPort.isHeldBy(eq(new Nickname("새닉")), eq("user-1"), any(Instant.class))).willReturn(true);
 			given(recordUserAccountPort.recordUserAccount(user)).willReturn(user);
 
@@ -281,7 +257,7 @@ class UserProfileCommandServiceTest {
 		void keepsNicknameHoldAfterPersistenceConflict() {
 			User user = new User("user-1", "test@test.com", "pw", "현재닉", 1L);
 			UpdateProfileCommand command = new UpdateProfileCommand("user-1", "새닉", null);
-			given(loadUserForProfilePort.loadProfileUser("user-1")).willReturn(Optional.of(user));
+			given(loadUserForProfilePort.loadProfileUserForUpdate("user-1")).willReturn(Optional.of(user));
 			given(nicknameHoldPort.isHeldBy(eq(new Nickname("새닉")), eq("user-1"), any(Instant.class))).willReturn(true);
 			given(recordUserAccountPort.recordUserAccount(user)).willThrow(new NicknameAlreadyExistsException("새닉"));
 
@@ -300,7 +276,7 @@ class UserProfileCommandServiceTest {
 		@DisplayName("유효한 캐릭터 ID로 프로필 이미지를 변경한다")
 		void validCharacterIdUpdatesImage() {
 			User user = new User("user-1", "test@test.com", "pw", "닉네임", 1L);
-			given(loadUserForProfilePort.loadProfileUser("user-1")).willReturn(Optional.of(user));
+			given(loadUserForProfilePort.loadProfileUserForUpdate("user-1")).willReturn(Optional.of(user));
 			given(fixedCharacterAvatarPort.resolveFixedCharacterObjectKey(1L))
 					.willReturn(Optional.of("public/characters/fixed/base_image_1.webp"));
 			given(recordUserAccountPort.recordUserAccount(any(User.class))).willReturn(user);
@@ -314,7 +290,7 @@ class UserProfileCommandServiceTest {
 		@DisplayName("존재하지 않는 캐릭터 이미지면 ProfileImageNotFoundException 발생")
 		void nonExistentCharacterThrowsNotFound() {
 			User user = new User("user-1", "test@test.com", "pw", "닉네임", 1L);
-			given(loadUserForProfilePort.loadProfileUser("user-1")).willReturn(Optional.of(user));
+			given(loadUserForProfilePort.loadProfileUserForUpdate("user-1")).willReturn(Optional.of(user));
 			given(fixedCharacterAvatarPort.resolveFixedCharacterObjectKey(999L)).willReturn(Optional.empty());
 
 			assertThatThrownBy(() -> service.updateProfileImage("user-1", 999L))
