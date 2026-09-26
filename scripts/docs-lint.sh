@@ -46,9 +46,9 @@ while IFS= read -r file; do
   base="$(basename "$file")"
   [[ "$base" == "README.md" ]] && continue
   fail "stray root docs file: $file"
-done < <(find "${ROOT_DOCS}" -maxdepth 1 -type f | sort)
+done < <(find "${ROOT_DOCS}" -maxdepth 1 -type f ! -name '.DS_Store' | sort)
 
-for file in docs/README.md $(find docs/indexes docs/architecture docs/standards docs/product-specs docs/handoffs docs/runbooks docs/incident-retrospectives docs/domain-models docs/references docs/archive -type f | sort); do
+for file in docs/README.md $(find docs/indexes docs/architecture docs/standards docs/product-specs docs/handoffs docs/runbooks docs/incident-retrospectives docs/domain-models docs/references docs/archive -type f ! -name '.DS_Store' | sort); do
   [[ -f "$file" ]] || continue
   [[ "$(basename "$file")" == ".gitkeep" ]] && continue
   grep -q "Status:" "$file" || fail "missing Status metadata: $file"
