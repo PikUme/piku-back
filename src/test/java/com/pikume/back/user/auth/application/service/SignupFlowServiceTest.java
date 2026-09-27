@@ -32,7 +32,7 @@ class SignupFlowServiceTest {
         when(policy.agreements()).thenReturn(List.of(new SignupAgreementDocument("TERMS", "v1", "actual terms", true)));
         when(character.resolveDefaultSignupCharacter()).thenReturn(9L);
         when(allowed.isEmailAllowed(anyString())).thenReturn(true);
-        service = new SignupFlowService(store, tx, policy, passwords, mock(IssueVerificationEmailPort.class), character, legacy, new PasswordPolicy(), allowed, nicknameHolds, uniqueness);
+        service = new SignupFlowService(store, tx, policy, passwords, new SignupEmailService(store, tx, policy, mock(IssueVerificationEmailPort.class), allowed), character, legacy, new PasswordPolicy(), allowed, nicknameHolds, uniqueness);
         when(store.createUser(any())).thenAnswer(i -> { User u=i.getArgument(0); return new User("u1",u.getEmail(),u.getPassword(),u.getNickname(),u.getCharacterId()); });
     }
     void proof(SignupAuthentication p) { when(store.lockProof(anyString())).thenReturn(Optional.of(p)); }

@@ -21,7 +21,7 @@ import com.pikume.back.user.auth.application.port.in.QuerySignupAgreementUseCase
 import com.pikume.back.user.auth.application.port.in.QuerySignupConfigurationUseCase;
 import com.pikume.back.user.auth.application.port.in.SignUpUseCase;
 import com.pikume.back.user.auth.application.port.in.SignupFlowUseCase;
-import com.pikume.back.user.auth.application.port.out.IssueVerificationEmailPort;
+import com.pikume.back.user.auth.application.port.in.SendSignupEmailCodeUseCase;
 import com.pikume.back.user.auth.application.port.out.PasswordProtectionPort;
 import com.pikume.back.user.auth.application.port.out.ResolveDefaultSignupCharacterPort;
 import com.pikume.back.user.auth.application.port.out.SignupPolicyPort;
@@ -46,7 +46,6 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -55,7 +54,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.UUID;
 import java.util.function.Supplier;
 import static com.pikume.back.user.auth.application.exception.SignupFailure.*;
 
@@ -72,7 +70,7 @@ public class SignupFlowService implements SignupFlowUseCase, QuerySignupAgreemen
 
     private final PasswordProtectionPort passwords;
 
-    private final IssueVerificationEmailPort emailSender;
+    private final SendSignupEmailCodeUseCase signupEmail;
 
     private final ResolveDefaultSignupCharacterPort characters;
 
@@ -102,41 +100,7 @@ public class SignupFlowService implements SignupFlowUseCase, QuerySignupAgreemen
     @Override
     public EmailSignupChallengeResult sendEmailCode(EmailSignupChallengeCommand command) {
         requireEnabled();
-        String email = validSignupEmail(command.email());
-        String caller = requiredHash(command.callerBinding());
-        String origin = requiredHash(command.requestOriginKey());
-        var reservation = tx(() -> {
-            Verification challenge = null;
-            if (command.challengeId() != null) {
-                challenge = store.lockChallenge(command.challengeId()).orElseThrow(() -> fail(CHALLENGE_INVALID));
-                if (!challenge.isBoundTo(email, caller) || challenge.getConsumedAt() != null) throw fail(CHALLENGE_INVALID);
-            }
-            // Rejection after the challenge/rate guard locks rolls back the reservation too.
-            Instant now = store.reserveEmailSend(hash(email.toLowerCase(Locale.ROOT)), origin, policy.emailHourlyLimit(), policy.originHourlyLimit(), policy.resendSeconds());
-            if (challenge != null) {
-                if (now.isBefore(challenge.getResendAvailableAt())) throw fail(RATE_LIMITED);
-                challenge.restartSignup(now, policy.resendSeconds());
-            } else {
-                challenge = Verification.signupChallenge(UUID.randomUUID().toString(), email, caller, now, policy.resendSeconds());
-            }
-            store.saveChallenge(challenge);
-            return new ChallengeReservation(challenge.getChallengeId(), challenge.getSentAt());
-        });
-        // Rate reservation commits before external mail. Failed/unknown delivery is never usable or reported successful.
-        String code;
-        try {
-            code = emailSender.issueVerificationEmail(email);
-        } catch (RuntimeException error) {
-            throw new SignupFlowException(EMAIL_SEND_FAILED, error);
-        }
-        if (code == null || !code.matches("[0-9]{6}")) throw fail(EMAIL_SEND_FAILED);
-        return tx(() -> {
-            Verification v = store.lockChallenge(reservation.id()).orElseThrow(() -> fail(CHALLENGE_INVALID));
-            if (!Objects.equals(v.getSentAt(), reservation.sentAt()) || v.getConsumedAt()!=null) throw fail(CHALLENGE_INVALID);
-            if (!Instant.now().isBefore(v.getExpiresAt().toInstant(ZoneOffset.UTC))) throw fail(CODE_EXPIRED);
-            v.activateSignupCode(code, Instant.now());
-            return new EmailSignupChallengeResult(v.getChallengeId(), v.getExpiresAt().toInstant(ZoneOffset.UTC), v.getResendAvailableAt());
-        });
+        return signupEmail.sendEmailCode(command);
     }
 
     @Override
@@ -447,6 +411,4 @@ public class SignupFlowService implements SignupFlowUseCase, QuerySignupAgreemen
     private record Attempt(SignupFailure failure, SignupProofResult result) {
     }
 
-    private record ChallengeReservation(String id, Instant sentAt) {
-    }
 }

@@ -28,7 +28,7 @@ class NicknameHoldMigrationTest {
 
 	@BeforeEach void migrate() {
 		var source = new DriverManagerDataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
-		var flyway = Flyway.configure().dataSource(source).cleanDisabled(false).target("18").load();
+		var flyway = Flyway.configure().dataSource(source).cleanDisabled(false).target("17").load();
 		flyway.clean();
 		flyway.migrate();
 		jdbc = new JdbcTemplate(source);

@@ -23,7 +23,7 @@ Google로 신규 생성한 회원은 비밀번호가 없다. 비밀번호 재설
 
 ## 프로토콜과 저장 경계
 
-`oauth_authorization_requests`는 state·호출자 해시, 암호화한 nonce·PKCE verifier, 목적·대상 회원·기기·등록 정보·상태·만료 시각을 저장한다. 요청 제한은 호출자와 출처 단위로 DB에 저장하며 새 state로 우회하지 못한다. V19는 이 자료 구조와 외부 계정 테이블 `user_oauth_accounts`, 가입 증명의 제공자·subject·이메일 검증 출처를 함께 추가한다. 선행 V16–V18은 이메일 가입·동의·프로필 스키마만 제공한다. 기존 이메일 가입 증명의 검증 출처는 `SERVICE`로 채우고 이메일·해시·만료·소비 상태를 보존한다.
+`oauth_authorization_requests`는 state·호출자 해시, 암호화한 nonce·PKCE verifier, 목적·대상 회원·기기·등록 정보·상태·만료 시각을 저장한다. 요청 제한은 호출자와 출처 단위로 DB에 저장하며 새 state로 우회하지 못한다. V20는 이 자료 구조와 외부 계정 테이블 `user_oauth_accounts`, 가입 증명의 제공자·subject·이메일 검증 출처를 함께 추가한다. 선행 V16–V19은 이메일 가입·동의·프로필 스키마만 제공한다. 기존 이메일 가입 증명의 검증 출처는 `SERVICE`로 채우고 이메일·해시·만료·소비 상태를 보존한다.
 
 Google 검증 어댑터는 공식 SDK의 서명·발급자·시간 검증과 명시적인 audience·authorized party·nonce 검증을 수행한다. 웹은 state와 PKCE S256, 모바일은 서버가 발행한 nonce와 등록 이름을 결합한다. 클라이언트가 임의 audience를 지정하지 않는다.
 

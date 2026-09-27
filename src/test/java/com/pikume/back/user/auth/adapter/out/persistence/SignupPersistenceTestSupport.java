@@ -5,6 +5,7 @@ import com.pikume.back.user.auth.application.exception.*;
 import com.pikume.back.user.auth.application.port.in.*;
 import com.pikume.back.user.auth.application.port.out.*;
 import com.pikume.back.user.auth.application.service.SignupFlowService;
+import com.pikume.back.user.auth.application.service.SignupEmailService;
 import com.pikume.back.user.auth.domain.*;
 import com.pikume.back.user.domain.User;
 import com.pikume.back.user.domain.service.PasswordPolicy;
@@ -27,7 +28,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 @DataJpaTest
-@Import({SignupPersistenceAdapter.class,SignupTransactionAdapter.class,SignupFlowService.class,PasswordPolicy.class,
+@Import({SignupPersistenceAdapter.class,SignupTransactionAdapter.class,SignupFlowService.class,SignupEmailService.class,PasswordPolicy.class,
  NicknameHoldPersistenceAdapter.class,UserAccountPersistenceAdapter.class})
 @Transactional(propagation=Propagation.NOT_SUPPORTED)
 abstract class SignupPersistenceTestSupport {

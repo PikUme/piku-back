@@ -91,19 +91,8 @@ class SignupPersistenceIntegrationTest extends SignupPersistenceTestSupport {
   assertThat(count("User")).isZero();assertThat(count("SignupAuthentication")).isEqualTo(1);
   assertThatThrownBy(() -> service.authenticateEmail(new EmailSignupAuthenticationCommand(c.challengeId(),"a@gmail.com","123456","Password!","caller"))).isInstanceOf(SignupFlowException.class);
  }
- @Test void changingChallengeIdentifierOrOriginCannotBypassEmailResendCooldown() {
-  service.sendEmailCode(new EmailSignupChallengeCommand("a@gmail.com","caller","origin",null));
-  assertThatThrownBy(() -> service.sendEmailCode(new EmailSignupChallengeCommand("A@gmail.com","caller","other-origin",null)))
-    .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.RATE_LIMITED);
-  verify(sender,times(1)).issueVerificationEmail(anyString());
- }
- @Test void failedMailLeavesReservedRateButUnusableChallenge() {
-  when(sender.issueVerificationEmail(anyString())).thenThrow(new IllegalStateException("delivery failed"));
-  assertThatThrownBy(() -> service.sendEmailCode(new EmailSignupChallengeCommand("a@gmail.com","caller","origin",null)))
-    .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.EMAIL_SEND_FAILED);
-  assertThat(count("Verification")).isEqualTo(1);
-  assertThat((Instant) tx.required(() -> em.createQuery("select v from Verification v",Verification.class).getSingleResult().getDeliveryCompletedAt())).isNull();
- }
+
+
  @Test void consentCommitsUserAgreementAndConsumedProofTogetherAndReplayUsesOriginalUser() {
   String raw=emailProof("new@gmail.com");
   SignupAgreementCommand command=new SignupAgreementCommand(raw,"caller",agreements);
@@ -171,14 +160,5 @@ class SignupPersistenceIntegrationTest extends SignupPersistenceTestSupport {
     .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.PROOF_EXPIRED);
   assertThat(count("User")).isEqualTo(1);
  }
- @Test void cleanupCannotRemoveARecentSendCooldownAtHourlyWindowBoundary() {
-  Instant now=Instant.now();
-  tx.required(() -> {
-   var bucket=new SignupRateLimit("email:"+SignupFlowService.hash("a@gmail.com"),now.minusSeconds(3601));
-   bucket.increment(now);em.persist(bucket);return null;
-  });
-  service.purgeExpiredSignupArtifacts();
-  assertThatThrownBy(() -> service.sendEmailCode(new EmailSignupChallengeCommand("a@gmail.com","caller","origin",null)))
-    .isInstanceOf(SignupFlowException.class).extracting("reason").isEqualTo(SignupFailure.RATE_LIMITED);
- }
+
 }

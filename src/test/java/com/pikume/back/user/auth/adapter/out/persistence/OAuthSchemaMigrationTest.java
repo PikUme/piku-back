@@ -25,7 +25,7 @@ class OAuthSchemaMigrationTest {
     @BeforeEach
     void migrateChapterSignupWithExistingEmailArtifacts() {
         var source = new DriverManagerDataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
-        var chapter = Flyway.configure().dataSource(source).cleanDisabled(false).target("18").load();
+        var chapter = Flyway.configure().dataSource(source).cleanDisabled(false).target("19").load();
         chapter.clean();
         chapter.migrate();
         jdbc = new JdbcTemplate(source);
@@ -51,7 +51,7 @@ class OAuthSchemaMigrationTest {
                     (id, user_id, agreement_type, agreement_version, content, agreed, accepted_at)
                 VALUES ('agreement', 'existing', 'TERMS', 'v1', 'actual terms', TRUE, '2026-09-26 00:00:00')
                 """);
-        Flyway.configure().dataSource(source).target("19").load().migrate();
+        Flyway.configure().dataSource(source).target("20").load().migrate();
     }
 
     @Test

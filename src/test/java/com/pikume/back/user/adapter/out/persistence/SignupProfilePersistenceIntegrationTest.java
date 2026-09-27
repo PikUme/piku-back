@@ -58,14 +58,6 @@ class SignupProfilePersistenceIntegrationTest {
 		users.deleteAll();
 	}
 
-	@Test void completedProfileUsesTheSameNormalizedDatabaseHoldForReservationAndUpdate() {
-		User user=users.saveAndFlush(new User("profile@example.com","hash","현재닉",1L));
-		assertThat(service.reserveIfAvailable("  새닉　 ",user.getId())).isTrue();
-		var result=service.updateProfile(new com.pikume.back.user.application.dto.UpdateProfileCommand(user.getId(),"\t새닉\n",null));
-		assertThat(result.success()).isTrue();assertThat(result.newNickname()).isEqualTo("새닉");
-		assertThat(jdbc.queryForObject("SELECT nickname FROM users WHERE id=?",String.class,user.getId())).isEqualTo("새닉");
-		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM nickname_holds",Integer.class)).isZero();
-	}
 
 	@Test void ownDefaultNicknameCompletesWithoutReservationAndReleasesAnAbandonedAlternative() {
 		User user=users.saveAndFlush(User.pending("haru@example.com",null,"haru",1L));

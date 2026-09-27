@@ -1,4 +1,4 @@
--- OAuth storage belongs to the Google login rollout, after chapter signup V16-V18.
+-- OAuth storage belongs to the Google login rollout, after chapter signup V16-V19.
 ALTER TABLE signup_authentications
     ADD COLUMN provider VARCHAR(20) DEFAULT NULL AFTER method,
     ADD COLUMN provider_subject VARCHAR(255) COLLATE utf8mb4_0900_bin DEFAULT NULL AFTER provider,

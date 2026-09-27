@@ -27,7 +27,7 @@ class OAuthAuthorizationRequestPersistenceAdapterTest {
     @BeforeEach void setup() {
         var ds = new DriverManagerDataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
         jdbc = new JdbcTemplate(ds);
-        var schema = Flyway.configure().dataSource(ds).cleanDisabled(false).target("19").load();
+        var schema = Flyway.configure().dataSource(ds).cleanDisabled(false).target("20").load();
         schema.clean();
         schema.migrate();
         store = new OAuthAuthorizationRequestPersistenceAdapter(jdbc, new DataSourceTransactionManager(ds));
