@@ -24,12 +24,14 @@ public class UserIdentityQueryService implements QueryUserIdentityUseCase {
 	@Override
 	public Optional<UserIdentityView> queryUserIdentityByEmail(String email) {
 		return loadUserForAuthenticationPort.loadForLogin(email)
+				.filter(user -> !user.isWithdrawn())
 				.map(this::toIdentityView);
 	}
 
 	@Override
 	public Optional<UserIdentityView> queryUserIdentityById(String userId) {
 		return loadUserForAuthenticationPort.loadForSession(userId)
+				.filter(user -> !user.isWithdrawn())
 				.map(this::toIdentityView);
 	}
 
@@ -41,6 +43,6 @@ public class UserIdentityQueryService implements QueryUserIdentityUseCase {
 				user.getId(),
 				user.getPassword(),
 				user.getNickname(),
-				avatarReference);
+				avatarReference, user.getProfileSetupStatus().name(), user.getCharacterId());
 	}
 }

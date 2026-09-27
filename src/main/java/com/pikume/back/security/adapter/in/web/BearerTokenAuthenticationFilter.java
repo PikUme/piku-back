@@ -72,8 +72,8 @@ public class BearerTokenAuthenticationFilter extends OncePerRequestFilter {
 		String userId = requireUserId(token);
 		UserIdentityView user = queryUserIdentityUseCase.queryUserIdentityById(userId)
 				.orElseThrow(() -> new BadCredentialsException("인증이 필요합니다."));
-		UserPrincipal userPrincipal = UserPrincipal.withAvatarReference(
-				user.id(), user.nickname(), user.avatarReference());
+		UserPrincipal userPrincipal = UserPrincipal.withProfileState(
+				user.id(), user.nickname(), user.avatarReference(), user.profileSetupStatus(), user.characterId());
 		return new UsernamePasswordAuthenticationToken(
 				userPrincipal,
 				null,

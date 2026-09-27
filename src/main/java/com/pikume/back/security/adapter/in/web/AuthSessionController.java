@@ -21,7 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @Tag(name = "Auth Session", description = "현재 인증 세션 확인 API")
 @RestController
-@RequestMapping("/api/auth")
+@RequestMapping({"/api/auth", "/api/mobile/auth"})
 @RequiredArgsConstructor
 public class AuthSessionController {
 

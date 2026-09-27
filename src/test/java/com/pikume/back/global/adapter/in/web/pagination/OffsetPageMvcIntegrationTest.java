@@ -14,9 +14,12 @@ import com.pikume.back.social.application.dto.CommentListItemResult;
 import com.pikume.back.social.application.dto.FriendSummaryResult;
 import com.pikume.back.social.application.service.CommentQueryService;
 import com.pikume.back.social.application.service.FriendQueryService;
+import com.pikume.back.user.application.dto.UserAccessProfileStatus;
+import com.pikume.back.user.application.dto.UserAccessView;
 import com.pikume.back.user.application.dto.UserAvatarReference;
 import com.pikume.back.user.application.dto.UserSearchResult;
 import com.pikume.back.user.application.service.UserSearchService;
+import com.pikume.back.user.application.port.in.QueryUserAccessUseCase;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -38,6 +41,7 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -74,6 +78,8 @@ class OffsetPageMvcIntegrationTest {
 	private FriendQueryService queryFriendPageUseCase;
 	@MockitoBean
 	private UserSearchService searchUserUseCase;
+	@MockitoBean
+	private QueryUserAccessUseCase queryUserAccessUseCase;
 
 	private MappingJackson2HttpMessageConverter jsonConverter;
 	private ObjectMapper originalObjectMapper;
@@ -169,6 +175,8 @@ class OffsetPageMvcIntegrationTest {
 	@Test
 	@DisplayName("친구 목록은 기본 식별자 내림차순과 프로필 값을 반환한다")
 	void friendsPreserveIdentifiersAndProfileValues() throws Exception {
+		given(queryUserAccessUseCase.queryUserAccess("user-1"))
+				.willReturn(Optional.of(new UserAccessView("user-1", false, UserAccessProfileStatus.COMPLETED)));
 		PageQuery expectedQuery = PageQuery.of(0, 10, List.of(SortQuery.desc("userId1")));
 		given(queryFriendPageUseCase.queryFriendPage(expectedQuery, "user-1"))
 				.willReturn(new PageResult<>(List.of(
@@ -190,6 +198,8 @@ class OffsetPageMvcIntegrationTest {
 	@Test
 	@DisplayName("받은 요청은 정렬 없는 기본 페이지 계약을 반환한다")
 	void receivedRequestsRemainUnsorted() throws Exception {
+		given(queryUserAccessUseCase.queryUserAccess("user-1"))
+				.willReturn(Optional.of(new UserAccessView("user-1", false, UserAccessProfileStatus.COMPLETED)));
 		PageQuery expectedQuery = PageQuery.of(0, 10);
 		given(queryFriendPageUseCase.queryReceivedFriendRequestPage(expectedQuery, "user-1"))
 				.willReturn(new PageResult<>(List.of(

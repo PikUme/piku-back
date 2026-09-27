@@ -19,15 +19,25 @@ import com.pikume.back.user.application.port.out.NicknameHoldPort;
 import com.pikume.back.user.application.port.out.RecordUserAccountPort;
 import com.pikume.back.user.domain.User;
 import com.pikume.back.user.domain.vo.Nickname;
+import com.pikume.back.user.application.dto.SignupNicknameReservation;
+import com.pikume.back.user.application.dto.SignupProfileResult;
+import com.pikume.back.user.application.exception.SignupProfileException;
+import com.pikume.back.user.application.exception.SignupProfileFailure;
+import com.pikume.back.user.application.port.in.ReserveSignupNicknameUseCase;
+import com.pikume.back.user.application.port.in.CompleteSignupProfileUseCase;
+import com.pikume.back.user.application.port.in.WithdrawPendingSignupUseCase;
+import java.util.Objects;
+
 import java.time.Instant;
 
 /**
- * 닉네임 예약과 기존 프로필 수정의 원자적 변경을 조정합니다.
+ * 닉네임 점유와 가입 프로필 완료, 기존 프로필 수정의 원자적 변경을 조정합니다.
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class UserProfileCommandService implements UpdateUserProfileUseCase, ReserveNicknameUseCase {
+public class UserProfileCommandService implements UpdateUserProfileUseCase, ReserveNicknameUseCase,
+		ReserveSignupNicknameUseCase, CompleteSignupProfileUseCase, WithdrawPendingSignupUseCase {
 
 	private final LoadUserForProfilePort loadUserForProfilePort;
 	private final RecordUserAccountPort recordUserAccountPort;
@@ -42,7 +52,7 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 		nicknameHoldPort.lockNicknameWrites();
 		User user = loadUserForProfilePort.loadProfileUserForUpdate(userId)
 				.orElseThrow(UserNotFoundException::new);
-		if (user.isWithdrawn()) return false;
+		if (user.isWithdrawn() || user.isProfileSetupRequired()) return false;
 		if (requestedNickname.value().equals(user.getNickname())) {
 			nicknameHoldPort.releaseForUser(userId);
 			return true;
@@ -62,7 +72,7 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 		nicknameHoldPort.lockNicknameWrites();
 		User user = loadUserForProfilePort.loadProfileUserForUpdate(command.userId())
 				.orElseThrow(UserNotFoundException::new);
-		if (user.isWithdrawn()) {
+		if (user.isWithdrawn() || user.isProfileSetupRequired()) {
 			return UpdateProfileResult.failure(UpdateProfileFailureReason.PROFILE_CONFLICT,
 				"현재 상태에서는 프로필을 수정할 수 없습니다.", user.getNickname());
 		}
@@ -116,7 +126,7 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 		User user = loadUserForProfilePort.loadProfileUserForUpdate(userId)
 				.orElseThrow(UserNotFoundException::new);
 
-		if (user.isWithdrawn()) {
+		if (user.isWithdrawn() || user.isProfileSetupRequired()) {
 			throw new UpdateProfileFailureException(UpdateProfileFailureReason.PROFILE_CONFLICT,
 				"현재 상태에서는 프로필을 수정할 수 없습니다.");
 		}
@@ -128,6 +138,91 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 
 		user.changeCharacter(imageId);
 		recordUserAccountPort.recordUserAccount(user);
+	}
+
+	@Override
+	@Transactional
+	public SignupNicknameReservation reserveSignupNickname(String userId, String nickname) {
+		Nickname requestedNickname = signupNickname(nickname);
+		nicknameHoldPort.lockNicknameWrites();
+		User user = loadActiveSignupUser(userId);
+		if (!user.isProfileSetupRequired()) {
+			throw new SignupProfileException(SignupProfileFailure.PROFILE_ALREADY_COMPLETED);
+		}
+		Instant now = Instant.now();
+		boolean ownsNickname=requestedNickname.value().equals(user.getNickname());
+		if ((!ownsNickname && checkUserUniquenessPort.isNicknameInUse(requestedNickname))
+				|| !nicknameHoldPort.tryAcquire(requestedNickname, userId, now)) {
+			throw new SignupProfileException(SignupProfileFailure.NICKNAME_UNAVAILABLE);
+		}
+		Instant expiresAt = nicknameHoldPort.heldUntil(requestedNickname, userId, now)
+			.orElseThrow(() -> new SignupProfileException(SignupProfileFailure.HOLD_REQUIRED));
+		return new SignupNicknameReservation(requestedNickname.value(), expiresAt);
+	}
+
+	@Override
+	@Transactional
+	public SignupProfileResult completeSignupProfile(String userId, String nickname, Long characterId) {
+		Nickname requestedNickname = signupNickname(nickname);
+		nicknameHoldPort.lockNicknameWrites();
+		User user = loadActiveSignupUser(userId);
+		if (!user.isProfileSetupRequired()) {
+			if (Objects.equals(user.getNickname(), requestedNickname.value()) && Objects.equals(user.getCharacterId(), characterId)) {
+				return signupProfileResult(user);
+			}
+			throw new SignupProfileException(SignupProfileFailure.PROFILE_ALREADY_COMPLETED);
+		}
+		if (!requestedNickname.value().equals(user.getNickname())) {
+			if (!nicknameHoldPort.isHeldBy(requestedNickname, userId, Instant.now())) {
+				throw new SignupProfileException(SignupProfileFailure.HOLD_REQUIRED);
+			}
+			if (checkUserUniquenessPort.isNicknameInUse(requestedNickname)) {
+				throw new SignupProfileException(SignupProfileFailure.NICKNAME_UNAVAILABLE);
+			}
+		}
+		if (characterId == null || characterId <= 0
+				|| fixedCharacterAvatarPort.resolveFixedCharacterObjectKey(characterId).isEmpty()) {
+			throw new SignupProfileException(SignupProfileFailure.INVALID_CHARACTER);
+		}
+		user.completeProfile(requestedNickname, characterId);
+		recordUserAccountPort.recordUserAccount(user);
+		nicknameHoldPort.releaseForUser(userId);
+		return signupProfileResult(user);
+	}
+
+	@Override
+	@Transactional
+	public void withdrawPendingSignup(String userId) {
+		nicknameHoldPort.lockNicknameWrites();
+		User user = loadUserForProfilePort.loadProfileUserForUpdate(userId)
+			.orElseThrow(() -> new SignupProfileException(SignupProfileFailure.USER_UNAVAILABLE));
+		if (user.isWithdrawn()) return;
+		if (!user.isProfileSetupRequired()) {
+			throw new SignupProfileException(SignupProfileFailure.PROFILE_ALREADY_COMPLETED);
+		}
+		user.withdraw();
+		recordUserAccountPort.recordUserAccount(user);
+		nicknameHoldPort.releaseForUser(userId);
+	}
+
+	private User loadActiveSignupUser(String userId) {
+		User user = loadUserForProfilePort.loadProfileUserForUpdate(userId)
+			.orElseThrow(() -> new SignupProfileException(SignupProfileFailure.USER_UNAVAILABLE));
+		if (user.isWithdrawn()) throw new SignupProfileException(SignupProfileFailure.USER_UNAVAILABLE);
+		return user;
+	}
+
+	private SignupProfileResult signupProfileResult(User user) {
+		return new SignupProfileResult(user.getId(), user.getNickname(), user.getCharacterId(),
+			user.getProfileSetupStatus().name());
+	}
+
+	private Nickname signupNickname(String nickname) {
+		try {
+			return new Nickname(nickname);
+		} catch (IllegalArgumentException exception) {
+			throw new SignupProfileException(SignupProfileFailure.INVALID_NICKNAME);
+		}
 	}
 
 	private void validateNicknameChange(String userId, Nickname requestedNickname) {

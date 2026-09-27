@@ -26,7 +26,9 @@ class UserLoginServiceTest {
 	private final PasswordProtectionPort passwords = mock(PasswordProtectionPort.class);
 	private final AuthenticationTokenPort tokens = mock(AuthenticationTokenPort.class);
 	private final RefreshSessionPort sessions = mock(RefreshSessionPort.class);
-	private final UserLoginService service = new UserLoginService(users, passwords, tokens, sessions);
+	private final com.pikume.back.user.application.port.in.QueryUserAccessUseCase access = mock(com.pikume.back.user.application.port.in.QueryUserAccessUseCase.class);
+    private final UserLoginService service = new UserLoginService(users, passwords,
+        new UserSessionIssuer(access, users, tokens, sessions));
 
 	@Test
 	@DisplayName("계정 확인부터 토큰과 갱신 세션 저장까지 로그인 순서를 조정한다")
@@ -36,7 +38,10 @@ class UserLoginServiceTest {
 						"user-1", "protected", "pikume",
 						new UserAvatarReference("avatar", false, false))));
 		given(passwords.matches("raw", "protected")).willReturn(true);
-		given(tokens.generateAccessToken("user-1")).willReturn("access");
+		given(access.queryUserAccess("user-1")).willReturn(Optional.of(new com.pikume.back.user.application.dto.UserAccessView("user-1",false,com.pikume.back.user.application.dto.UserAccessProfileStatus.COMPLETED)));
+        var identity = users.queryUserIdentityByEmail("user@example.com");
+        given(users.queryUserIdentityById("user-1")).willReturn(identity);
+        given(tokens.generateAccessToken("user-1")).willReturn("access");
 		given(tokens.generateRefreshToken()).willReturn("refresh");
 
 		var result = service.login(new LoginCommand("user@example.com", "raw", "device-1"));

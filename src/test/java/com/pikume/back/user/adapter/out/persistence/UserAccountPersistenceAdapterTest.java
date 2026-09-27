@@ -49,16 +49,16 @@ class UserAccountPersistenceAdapterTest {
 	}
 
 	@Test
-	@DisplayName("비밀번호 재설정 사용자 적재를 이메일 값 객체 조회로 번역한다")
+	@DisplayName("비밀번호 재설정 사용자 적재는 이메일로 행 잠금을 획득한다")
 	void loadsPasswordResetUserByEmail() {
 		User user = user("user-1", "user@example.com");
 		Email email = new Email("user@example.com");
-		given(userJpaRepository.findByEmail(email)).willReturn(Optional.of(user));
+		given(userJpaRepository.findByEmailForUpdate(email)).willReturn(Optional.of(user));
 		UserAccountPersistenceAdapter adapter = new UserAccountPersistenceAdapter(userJpaRepository);
 
 		assertThat(adapter.loadPasswordResetUser("user@example.com")).contains(user);
 
-		then(userJpaRepository).should().findByEmail(email);
+		then(userJpaRepository).should().findByEmailForUpdate(email);
 	}
 
 	@Test

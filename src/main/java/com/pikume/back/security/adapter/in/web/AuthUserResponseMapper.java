@@ -21,7 +21,7 @@ public class AuthUserResponseMapper {
 		return new UserInfo(
 				userInfo.id(),
 				userInfo.nickname(),
-				resolveAvatarUrl(userInfo.avatarReference()));
+				resolveAvatarUrl(userInfo.avatarReference()), userInfo.profileSetupStatus(), userInfo.characterId());
 	}
 
 	public UserInfo toDisplayUserInfo(UserPrincipal userDetails) {
@@ -31,7 +31,7 @@ public class AuthUserResponseMapper {
 		return new UserInfo(
 				userDetails.getId(),
 				userDetails.getNickname(),
-				resolveAvatarUrl(userDetails.getAvatarReference()));
+				resolveAvatarUrl(userDetails.getAvatarReference()), userDetails.getProfileSetupStatus(), userDetails.getCharacterId());
 	}
 
 	private String resolveAvatarUrl(UserAvatarReference reference) {

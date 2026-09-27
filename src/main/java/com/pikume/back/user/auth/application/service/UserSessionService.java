@@ -1,6 +1,7 @@
 package com.pikume.back.user.auth.application.service;
 
 import com.pikume.back.user.auth.application.dto.ReissueSessionResult;
+import com.pikume.back.user.application.port.in.QueryUserAccessUseCase;
 import com.pikume.back.user.auth.application.port.in.LogoutUseCase;
 import com.pikume.back.user.auth.application.port.in.ReissueSessionUseCase;
 import com.pikume.back.user.auth.application.port.out.AuthenticationTokenPort;
@@ -18,6 +19,7 @@ public class UserSessionService implements ReissueSessionUseCase, LogoutUseCase 
 	private final AuthenticationTokenPort authenticationTokenPort;
 	private final RefreshSessionPort refreshSessionPort;
 	private final RevokeDevicePushTokenPort revokeDevicePushTokenPort;
+	private final QueryUserAccessUseCase queryUserAccessUseCase;
 
 	@Override
 	@Transactional
@@ -66,6 +68,10 @@ public class UserSessionService implements ReissueSessionUseCase, LogoutUseCase 
 		RefreshSessionPort.RefreshSession session = refreshSessionPort.loadSessionByRefreshToken(refreshToken).orElse(null);
 		if (session == null || !StringUtils.hasText(session.userId())) {
 			if (session != null) refreshSessionPort.removeSessionByRefreshToken(refreshToken);
+			return null;
+		}
+		if (queryUserAccessUseCase.queryUserAccess(session.userId()).filter(user -> !user.withdrawn()).isEmpty()) {
+			refreshSessionPort.removeSessionByRefreshToken(refreshToken);
 			return null;
 		}
 		return session;

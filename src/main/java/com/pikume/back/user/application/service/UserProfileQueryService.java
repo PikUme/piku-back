@@ -35,6 +35,7 @@ public class UserProfileQueryService implements QueryUserProfileUseCase {
 	@Override
 	public ProfilePreviewResult queryProfilePreview(String profileId, String currentUserId) {
 		User profile = loadUserForProfilePort.loadProfileUser(profileId)
+					.filter(user -> !user.isProfileSetupRequired())
 					.orElseThrow(UserNotFoundException::new);
 
 		int friendCount = socialMetricsPort.queryFriendCount(profileId);

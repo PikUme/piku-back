@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import com.pikume.back.user.application.port.out.QueryUserStatisticsPort;
+import com.pikume.back.user.domain.ProfileSetupStatus;
 
 import java.sql.Timestamp;
 import java.time.LocalDate;
@@ -54,16 +55,39 @@ class UserDashboardStatisticsJpaRepositoryTest {
 				assertThat(row).isEqualTo(new QueryUserStatisticsPort.DailyCount(date, 1L)));
 	}
 
+	@Test
+	@DisplayName("공개 활성 회원 통계는 프로필 설정 완료 회원만 집계하고 운영 누적 통계는 가입 대기도 유지한다")
+	void excludesPendingUsersOnlyFromPublicActiveStatistics() {
+		LocalDate date = LocalDate.of(2026, 6, 16);
+		insertUser("completed", date.atTime(10, 0), null, ProfileSetupStatus.COMPLETED);
+		insertUser("pending", date.atTime(11, 0), null, ProfileSetupStatus.REQUIRED);
+		UserStatisticsPersistenceAdapter adapter = new UserStatisticsPersistenceAdapter(userJpaRepository);
+
+		assertThat(adapter.countActiveMembers()).isEqualTo(1L);
+		assertThat(adapter.countActiveSignupMembersByDate(date, date))
+				.containsExactly(new QueryUserStatisticsPort.DailyCount(date, 1L));
+		assertThat(adapter.countAllMembers()).isEqualTo(2L);
+		assertThat(adapter.countAllSignupMembersByDate(date, date))
+				.containsExactly(new QueryUserStatisticsPort.DailyCount(date, 2L));
+	}
+
 	private void insertUser(String suffix, LocalDateTime createdAt, LocalDateTime deletedAt) {
+		insertUser(suffix, createdAt, deletedAt, ProfileSetupStatus.COMPLETED);
+	}
+
+	private void insertUser(String suffix, LocalDateTime createdAt, LocalDateTime deletedAt,
+			ProfileSetupStatus profileSetupStatus) {
 		jdbcTemplate.update("""
-					INSERT INTO users (id, email, password, nickname, character_id, created_at, updated_at, deleted_at)
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+					INSERT INTO users (id, email, password, nickname, character_id, profile_setup_status,
+					                   created_at, updated_at, deleted_at)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 				""",
 				"user-" + suffix,
 				suffix + "@example.com",
 					"password",
 					"nick-" + suffix,
 					1L,
+				profileSetupStatus.name(),
 				Timestamp.valueOf(createdAt),
 				Timestamp.valueOf(createdAt),
 				deletedAt == null ? null : Timestamp.valueOf(deletedAt));

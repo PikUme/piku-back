@@ -1,6 +1,7 @@
 package com.pikume.back.user.adapter.out.persistence;
 
 import com.pikume.back.user.application.port.out.QueryUserStatisticsPort;
+import com.pikume.back.user.domain.ProfileSetupStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
@@ -17,7 +18,7 @@ public class UserStatisticsPersistenceAdapter implements QueryUserStatisticsPort
 
 	@Override
 	public long countActiveMembers() {
-		return jpaRepository.countByDeletedAtIsNull();
+		return jpaRepository.countByDeletedAtIsNullAndProfileSetupStatus(ProfileSetupStatus.COMPLETED);
 	}
 
 	@Override

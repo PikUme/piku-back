@@ -29,7 +29,12 @@ public class UserSummaryQueryService implements QueryUserSummaryUseCase {
 			return Map.of();
 		}
 
-		List<User> users = loadUserReferencePort.loadReferences(userIds);
+		List<User> users = loadUserReferencePort.loadReferences(userIds).stream()
+				.filter(user -> !user.isProfileSetupRequired())
+				.toList();
+		if (users.isEmpty()) {
+			return Map.of();
+		}
 		Map<AvatarCharacterSelection, UserAvatarReference> avatarReferences = userAvatarReferenceResolver
 				.resolveRequired(users.stream()
 						.map(user -> new AvatarCharacterSelection(user.getId(), user.getCharacterId()))

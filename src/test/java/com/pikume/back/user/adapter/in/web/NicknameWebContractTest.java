@@ -5,6 +5,10 @@ import com.pikume.back.global.exception.GlobalExceptionHandler;
 import com.pikume.back.global.port.out.ResolveObjectUrlPort;
 import com.pikume.back.security.principal.UserPrincipal;
 import com.pikume.back.user.adapter.out.persistence.NicknameHoldPersistenceAdapter;
+import com.pikume.back.user.auth.adapter.in.web.SignupWebCredentials;
+import com.pikume.back.user.auth.application.port.in.LegacySignupProofUseCase;
+import com.pikume.back.user.auth.application.port.in.QuerySignupConfigurationUseCase;
+import com.pikume.back.user.auth.application.dto.SignupConfiguration;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
@@ -133,8 +137,16 @@ class NicknameWebContractTest {
 				nicknameHoldAdapter);
 
 		ProblemDetailFactory problemDetailFactory = new ProblemDetailFactory();
-		AuthController authController = new AuthController(
-				authService, authService, authService, queryAllowedEmailUseCase);
+		LegacySignupProofUseCase legacyProof = mock(LegacySignupProofUseCase.class);
+		// The proof boundary is a test double; nickname validation still executes the real signup service.
+		doAnswer(call -> { authService.signUp(call.getArgument(0)); return null; })
+				.when(legacyProof).completeLegacy(any(), any(), any());
+		QuerySignupConfigurationUseCase configuration = () -> new SignupConfiguration(false, true);
+		SignupWebCredentials credentials = mock(SignupWebCredentials.class);
+		given(credentials.requireProof(any())).willReturn("proof");
+		given(credentials.requireBinding(any())).willReturn("binding");
+		AuthController authController = new AuthController(legacyProof, authService, authService,
+				queryAllowedEmailUseCase, configuration, credentials);
 		UserController userController = new UserController(
 				mock(QueryUserProfileUseCase.class),
 				profileService,
