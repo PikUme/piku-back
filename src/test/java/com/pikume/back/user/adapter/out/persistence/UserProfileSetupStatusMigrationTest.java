@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @Testcontainers
 @Tag("mysql-migration")
-@DisplayName("V16 사용자 프로필 설정 상태 마이그레이션")
+@DisplayName("V18 사용자 프로필 설정 상태 마이그레이션")
 class UserProfileSetupStatusMigrationTest {
 
 	@Container
@@ -31,13 +31,13 @@ class UserProfileSetupStatusMigrationTest {
 	private JdbcTemplate jdbcTemplate;
 
 	@BeforeEach
-	void migrateToVersion15() {
+	void migrateToVersion17() {
 		dataSource = new DriverManagerDataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
 		jdbcTemplate = new JdbcTemplate(dataSource);
 		Flyway flyway = Flyway.configure()
 				.dataSource(dataSource)
 				.cleanDisabled(false)
-				.target(MigrationVersion.fromVersion("15"))
+				.target(MigrationVersion.fromVersion("17"))
 				.load();
 		flyway.clean();
 		flyway.migrate();

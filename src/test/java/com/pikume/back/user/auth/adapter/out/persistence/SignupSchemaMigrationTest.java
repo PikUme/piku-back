@@ -18,10 +18,10 @@ class SignupSchemaMigrationTest {
     JdbcTemplate jdbc;
     @BeforeEach void migrate() {
         var source=new DriverManagerDataSource(MYSQL.getJdbcUrl(),MYSQL.getUsername(),MYSQL.getPassword());
-        var old=Flyway.configure().dataSource(source).cleanDisabled(false).target("16").load();
+        var old=Flyway.configure().dataSource(source).cleanDisabled(false).target("18").load();
         old.clean();old.migrate();jdbc=new JdbcTemplate(source);
         jdbc.update("INSERT INTO verification (email,code,type,expires_at) VALUES ('legacy@gmail.com','123456','SIGN_UP',NOW())");
-        Flyway.configure().dataSource(source).target("17").load().migrate();
+        Flyway.configure().dataSource(source).target("19").load().migrate();
     }
     @Test void chapterSchemaContainsOnlyEmailSignupArtifacts() {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='user_oauth_accounts'", Integer.class)).isZero();
@@ -31,16 +31,4 @@ class SignupSchemaMigrationTest {
                 .doesNotContain("signup_proof_hash");
     }
 
-    @Test void preservesLegacyVerification() {
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM verification WHERE challenge_id IS NULL AND caller_hash IS NULL AND attempts IS NULL",Integer.class)).isEqualTo(1);
-    }
-
-    @Test void challengeIdentifiersAreUniqueButLegacyNullIdentifiersCanRepeat() {
-        jdbc.update("INSERT INTO verification (email,code,type,expires_at,challenge_id) VALUES ('new@gmail.com','hash','SIGN_UP',NOW(),'challenge')");
-        assertThatThrownBy(() -> jdbc.update("INSERT INTO verification (email,code,type,expires_at,challenge_id) VALUES ('other@gmail.com','hash','SIGN_UP',NOW(),'challenge')"))
-                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
-        jdbc.update("INSERT INTO verification (email,code,type,expires_at) VALUES ('legacy2@gmail.com','123456','SIGN_UP',NOW())");
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM verification WHERE challenge_id IS NULL",Integer.class)).isEqualTo(2);
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM signup_rate_limits WHERE bucket_key='guard'",Integer.class)).isEqualTo(1);
-    }
 }

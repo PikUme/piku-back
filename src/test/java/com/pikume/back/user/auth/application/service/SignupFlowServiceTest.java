@@ -32,7 +32,7 @@ class SignupFlowServiceTest {
         when(character.resolveDefaultSignupCharacter()).thenReturn(9L);
         var allowed = mock(com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase.class);
         when(allowed.isEmailAllowed(anyString())).thenReturn(true);
-        service = new SignupFlowService(store, tx, policy, passwords, mock(IssueVerificationEmailPort.class), character, legacy, new PasswordPolicy(), allowed, nicknameHolds, uniqueness);
+        service = new SignupFlowService(store, tx, policy, passwords, new SignupEmailService(store, tx, policy, mock(IssueVerificationEmailPort.class), allowed), character, legacy, new PasswordPolicy(), allowed, nicknameHolds, uniqueness);
         when(store.createUser(any())).thenAnswer(i -> { User u=i.getArgument(0); return new User("u1",u.getEmail(),u.getPassword(),u.getNickname(),u.getCharacterId()); });
     }
     void proof(SignupAuthentication p) { when(store.lockProof(anyString())).thenReturn(Optional.of(p)); }
