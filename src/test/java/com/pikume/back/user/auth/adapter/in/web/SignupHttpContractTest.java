@@ -33,6 +33,7 @@ class SignupHttpContractTest {
     IssueUserSessionUseCase issue = mock(IssueUserSessionUseCase.class);
     LegacySignupProofUseCase legacy = mock(LegacySignupProofUseCase.class);
     VerifyEmailUseCase verify = mock(VerifyEmailUseCase.class);
+    GoogleAuthenticationUseCase google = mock(GoogleAuthenticationUseCase.class);
     QueryUserAccessUseCase users = mock(QueryUserAccessUseCase.class);
     MockMvc mvc;
     static final String BINDING="b".repeat(43), CSRF="c".repeat(43), PROOF="p".repeat(43);
@@ -41,7 +42,8 @@ class SignupHttpContractTest {
         var sessions = new SignupSessionResponseWriter(issue,new AuthUserResponseMapper((value,accessible) -> "https://assets.example/"+value),credentials);
         var controller = new SignupController(flow,mock(QuerySignupAgreementUseCase.class),config,users,mock(ReserveSignupNicknameUseCase.class),mock(CompleteSignupProfileUseCase.class),mock(WithdrawPendingSignupUseCase.class),credentials,sessions);
         var old = new AuthController(legacy,verify,mock(ResetPasswordUseCase.class),mock(QueryAllowedEmailUseCase.class),config,credentials);
-        mvc=MockMvcBuilders.standaloneSetup(controller,old)
+        var settings = new SignupWebSettings(); settings.setCompletionUri("https://www.pikume.com/auth/complete");
+        mvc=MockMvcBuilders.standaloneSetup(controller,old,new GoogleAuthenticationController(google,credentials,sessions,settings))
             .setCustomArgumentResolvers(new org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver())
             .setControllerAdvice(new SignupExceptionHandler(new ProblemDetailFactory())).build();
     }
@@ -120,8 +122,18 @@ class SignupHttpContractTest {
         assertThat(response.getCookie(SignupWebCredentials.PROOF).getMaxAge()).isBetween(1,45);
     }
     @ParameterizedTest
-    @EnumSource(value=SignupFailure.class,names={"INVALID_EMAIL"})
-    void invalidEmailReturnsAuthenticationRestartProblem(SignupFailure failure) throws Exception {
+    @ValueSource(strings={"/api/auth/signup/social/email","/api/mobile/auth/signup/social/email"})
+    void removedSocialEmailEndpointCannotChangeAnAuthentication(String path) throws Exception {
+        mvc.perform(post(path).header("Origin","https://www.pikume.com")
+            .header("X-Signup-CSRF",CSRF).header("X-Signup-Binding",BINDING).header("X-Signup-Proof",PROOF)
+            .cookie(cookies()).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"challengeId\":\"old-social-challenge\",\"email\":\"other@gmail.com\",\"code\":\"123456\"}"))
+            .andExpect(status().isNotFound());
+        verifyNoInteractions(flow);
+    }
+    @ParameterizedTest
+    @EnumSource(value=SignupFailure.class,names={"EMAIL_REQUIRED","INVALID_EMAIL"})
+    void unavailableProviderEmailReturnsAuthenticationRestartProblem(SignupFailure failure) throws Exception {
         given(flow.agree(any())).willThrow(new SignupFlowException(failure));
         mvc.perform(post("/api/mobile/auth/signup/agreements").header("X-Signup-Binding",BINDING)
             .header("X-Signup-Proof",PROOF).header("Device-Id","device").contentType(MediaType.APPLICATION_JSON)
@@ -180,7 +192,57 @@ class SignupHttpContractTest {
             .andExpect(status().isGone()).andExpect(jsonPath("$.code").value("LEGACY_SIGNUP_DISABLED"));
         verifyNoInteractions(legacy);
     }
-
+    @Test void callbackRedirectContainsNoCredentialsAndUsesBoundDevice() throws Exception {
+        given(google.completeWeb("state","code",BINDING)).willReturn(new GoogleAuthenticationResult(new SignupProofResult(PROOF,new SignupProgress(SignupNextAction.AGREEMENTS,"user@gmail.com",null,null,Instant.now().plusSeconds(600))),"bound-device"));
+        mvc.perform(get("/api/auth/oauth/google/callback").param("state","state").param("code","code").cookie(cookies()))
+            .andExpect(status().isSeeOther()).andExpect(header().string("Location","https://www.pikume.com/auth/complete"))
+            .andExpect(header().string("Referrer-Policy","no-referrer"));
+        verifyNoInteractions(issue);
+    }
+    @Test void existingGoogleLoginClearsAnEarlierSignupProofAfterSessionIssuance() throws Exception {
+        given(google.completeWeb("state","code",BINDING)).willReturn(new GoogleAuthenticationResult(new SignupProofResult(null,
+            new SignupProgress(SignupNextAction.COMPLETE,"existing@gmail.com","existing","COMPLETED",null)),"bound-device"));
+        given(issue.issueSession("existing","bound-device")).willReturn(new LoginResult("access","refresh",
+            new LoginResult.UserInfo("existing","existing",null,"COMPLETED")));
+        mvc.perform(get("/api/auth/oauth/google/callback").param("state","state").param("code","code").cookie(cookies()))
+            .andExpect(status().isSeeOther()).andExpect(cookie().maxAge(SignupWebCredentials.PROOF,0))
+            .andExpect(cookie().value("rn","refresh"));
+    }
+    @ParameterizedTest
+    @EnumSource(value=SignupFailure.class,names={"EMAIL_REQUIRED","INVALID_EMAIL"})
+    void providerEmailFailureReturnsOnlyBoundedPublicErrorAtWebCallback(SignupFailure failure) throws Exception {
+        given(google.completeWeb("state","code",BINDING)).willThrow(new SignupFlowException(failure));
+        mvc.perform(get("/api/auth/oauth/google/callback").param("state","state").param("code","code").cookie(cookies()))
+            .andExpect(status().isSeeOther())
+            .andExpect(header().string("Location","https://www.pikume.com/auth/complete?oauthError="+failure.name()))
+            .andExpect(cookie().doesNotExist(SignupWebCredentials.PROOF)).andExpect(cookie().doesNotExist("rn"));
+        verifyNoInteractions(issue);
+    }
+    @ParameterizedTest
+    @EnumSource(value=SignupFailure.class,names={"EMAIL_REQUIRED","INVALID_EMAIL"})
+    void providerEmailFailureReturnsRestartProblemAtMobileCompletion(SignupFailure failure) throws Exception {
+        given(google.completeMobile("state","id-token",BINDING)).willThrow(new SignupFlowException(failure));
+        mvc.perform(post("/api/mobile/auth/oauth/google/complete").header("X-Signup-Binding",BINDING)
+            .contentType(MediaType.APPLICATION_JSON).content("{\"state\":\"state\",\"idToken\":\"id-token\"}"))
+            .andExpect(status().isBadRequest()).andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+            .andExpect(jsonPath("$.status").value(400)).andExpect(jsonPath("$.detail").isString())
+            .andExpect(jsonPath("$.instance").value("/api/mobile/auth/oauth/google/complete"))
+            .andExpect(jsonPath("$.code").value(failure.name())).andExpect(jsonPath("$.nextAction").value("AUTHENTICATE"))
+            .andExpect(jsonPath("$.proof").doesNotExist()).andExpect(jsonPath("$.user").doesNotExist());
+        verifyNoInteractions(issue);
+    }
+    @Test void cancelledCallbackReturnsToFrontendWithBoundedPublicError() throws Exception {
+        mvc.perform(get("/api/auth/oauth/google/callback").param("state","state").param("error","access_denied").cookie(cookies()))
+            .andExpect(status().isSeeOther()).andExpect(header().string("Location","https://www.pikume.com/auth/complete?oauthError=GOOGLE_CANCELLED"));
+        verify(google).failWeb("state",BINDING);
+        verifyNoInteractions(issue);
+    }
+    @Test void replayCallbackReturnsToFrontendWithoutIssuingCredentials() throws Exception {
+        given(google.completeWeb("state","code",BINDING)).willThrow(new com.pikume.back.user.auth.domain.exception.OAuthRequestException(com.pikume.back.user.auth.domain.exception.OAuthRequestException.Reason.REPLAY));
+        mvc.perform(get("/api/auth/oauth/google/callback").param("state","state").param("code","code").cookie(cookies()))
+            .andExpect(status().isSeeOther()).andExpect(header().string("Location","https://www.pikume.com/auth/complete?oauthError=OAUTH_REPLAY"));
+        verifyNoInteractions(issue);
+    }
     private Cookie[] cookies() {return new Cookie[]{new Cookie(SignupWebCredentials.BINDING,BINDING),new Cookie(SignupWebCredentials.CSRF,CSRF),new Cookie(SignupWebCredentials.PROOF,PROOF)};}
     private String emailBody() {return "{\"challengeId\":\"challenge\",\"email\":\"user@gmail.com\",\"code\":\"123456\",\"password\":\"abc@123\"}";}
 }

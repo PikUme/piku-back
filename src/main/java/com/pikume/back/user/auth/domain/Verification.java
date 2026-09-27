@@ -42,6 +42,9 @@ public class Verification {
     private String challengeId;
     @Column(length = 64)
     private String callerHash;
+    // Retained for applied-schema compatibility; old social challenges cannot be reused.
+    @Column(length = 64)
+    private String signupProofHash;
     private Integer attempts;
     private Instant sentAt;
     private Instant resendAvailableAt;
@@ -62,7 +65,7 @@ public class Verification {
 
     public boolean isBoundTo(String email, String callerHash) {
         return Objects.equals(this.email, email) && Objects.equals(this.callerHash, callerHash)
-                && type == VerificationType.SIGN_UP;
+                && signupProofHash == null && type == VerificationType.SIGN_UP;
     }
 
     public void restartSignup(Instant now, int resendSeconds) {

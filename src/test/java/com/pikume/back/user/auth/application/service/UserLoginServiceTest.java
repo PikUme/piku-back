@@ -28,7 +28,7 @@ class UserLoginServiceTest {
 	private final RefreshSessionPort sessions = mock(RefreshSessionPort.class);
 	private final com.pikume.back.user.application.port.in.QueryUserAccessUseCase access = mock(com.pikume.back.user.application.port.in.QueryUserAccessUseCase.class);
     private final UserLoginService service = new UserLoginService(users, passwords,
-        new UserSessionIssuer(access, users, tokens, sessions));
+        new UserSessionIssuer(access, users, tokens, sessions, passwords));
 
 	@Test
 	@DisplayName("계정 확인부터 토큰과 갱신 세션 저장까지 로그인 순서를 조정한다")

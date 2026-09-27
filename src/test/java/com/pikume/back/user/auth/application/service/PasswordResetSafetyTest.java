@@ -29,6 +29,7 @@ class PasswordResetSafetyTest {
     @Spy PasswordPolicy policy = new PasswordPolicy();
     @Spy EmailVerificationPolicy verificationPolicy = new EmailVerificationPolicy();
     @InjectMocks AuthService service;
+    @Test void verifiedEmailCannotAddPasswordToSocialOnlyUser() { reject(new User("user@gmail.com",null,"nick",1L)); }
     @Test void verifiedEmailCannotResetWithdrawnUser() {
         User user = new User("user@gmail.com","old","nick",1L);
         user.withdraw();

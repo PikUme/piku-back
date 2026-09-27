@@ -11,6 +11,8 @@
 
 ## Active Documents
 
+- [Google 로그인 변경 계약](../handoffs/google-login-handoff.md): 웹 OAuth·모바일 nonce 인증, 계정 연결과 복귀 계약
+
 - [챕터형 회원가입 변경 계약](../handoffs/chapter-signup-handoff.md): 웹·모바일 가입 API, 자격 전달과 재시도 계약
 
 - [Admin Session Authentication Handoff](../handoffs/admin-session-authentication-handoff.md): 관리자 세션 쿠키와 CSRF 기반 프론트엔드 인증 계약

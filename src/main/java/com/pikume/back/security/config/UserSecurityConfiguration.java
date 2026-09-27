@@ -61,6 +61,8 @@ public class UserSecurityConfiguration {
 				permittedPaths.add(base + "/signup/" + action);
 			}
 		}
+		permittedPaths.addAll(List.of("/api/auth/oauth/google/start", "/api/auth/oauth/google/callback",
+				"/api/mobile/auth/oauth/google/challenge", "/api/mobile/auth/oauth/google/complete"));
 
 		if (Arrays.asList(environment.getActiveProfiles()).contains("dev")) {
 			permittedPaths.addAll(Arrays.asList(
