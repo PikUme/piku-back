@@ -63,7 +63,8 @@ class AuthControllerTest {
 
 	@Mock
 	private QueryAllowedEmailUseCase queryAllowedEmailUseCase;
-	@Mock private EmailVerificationUseCase emailVerificationUseCase;
+	@Mock
+	private EmailVerificationUseCase emailVerificationUseCase;
 
 	private MockMvc mockMvc;
 	private final ObjectMapper objectMapper = new ObjectMapper();

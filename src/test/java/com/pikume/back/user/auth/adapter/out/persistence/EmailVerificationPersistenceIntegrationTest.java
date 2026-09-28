@@ -23,88 +23,111 @@ import static org.mockito.Mockito.*;
 @Import({EmailVerificationPersistenceAdapter.class, EmailVerificationTransactionAdapter.class, EmailVerificationService.class})
 @Transactional(propagation=Propagation.NOT_SUPPORTED)
 class EmailVerificationPersistenceIntegrationTest {
- @Autowired EmailVerificationService service;
- @Autowired EmailVerificationStorePort store;
- @Autowired EmailVerificationTransactionPort tx;
- @Autowired EntityManager em;
- @Autowired VerificationJpaRepository verifications;
- @MockitoBean EmailVerificationPolicyPort policy;
- @MockitoBean IssueVerificationEmailPort sender;
- @MockitoBean QueryAllowedEmailUseCase allowed;
 
- @BeforeEach void setup() {
-  tx.required(() -> {
-   em.createQuery("delete from Verification").executeUpdate();
-   em.createQuery("delete from EmailVerificationRateLimit").executeUpdate();
-   em.persist(new EmailVerificationRateLimit("guard",Instant.EPOCH));return null;
-  });
-  when(policy.maxCodeAttempts()).thenReturn(5);
-  when(policy.resendSeconds()).thenReturn(60);
-  when(policy.emailHourlyLimit()).thenReturn(5);when(policy.originHourlyLimit()).thenReturn(30);
-  when(allowed.isEmailAllowed(anyString())).thenReturn(true);
-  when(sender.issueVerificationEmail(anyString())).thenReturn("123456");
- }
- long count(String entity) {
-  return tx.required(() -> em.createQuery("select count(e) from "+entity+" e",Long.class).getSingleResult());
- }
+	@Autowired
+	EmailVerificationService service;
 
- @Test void changingVerificationIdentifierOrOriginCannotBypassEmailResendCooldown() {
-  service.sendEmailCode(new SendEmailVerificationCommand("a@gmail.com","origin"));
-  assertThatThrownBy(() -> service.sendEmailCode(new SendEmailVerificationCommand("A@gmail.com","other-origin")))
-    .isInstanceOf(EmailVerificationException.class).extracting("reason").isEqualTo(EmailVerificationFailure.RATE_LIMITED);
-  verify(sender,times(1)).issueVerificationEmail(anyString());
- }
+	@Autowired
+	EmailVerificationStorePort store;
 
- @Test void failedMailLeavesReservedRateButUnusableVerification() {
-  when(sender.issueVerificationEmail(anyString())).thenThrow(new IllegalStateException("delivery failed"));
-  assertThatThrownBy(() -> service.sendEmailCode(new SendEmailVerificationCommand("a@gmail.com","origin")))
-    .isInstanceOf(EmailVerificationException.class).extracting("reason").isEqualTo(EmailVerificationFailure.EMAIL_SEND_FAILED);
-  assertThat(count("Verification")).isEqualTo(1);
-  assertThat((Instant) tx.required(() -> em.createQuery("select v from Verification v",Verification.class).getSingleResult().getDeliveryCompletedAt())).isNull();
- }
+	@Autowired
+	EmailVerificationTransactionPort tx;
 
- @Test void cleanupCannotRemoveARecentSendCooldownAtHourlyWindowBoundary() {
-  Instant now=Instant.now();
-  tx.required(() -> {
-   var bucket=new EmailVerificationRateLimit("email:"+EmailVerificationService.hash("a@gmail.com"),now.minusSeconds(3601));
-   bucket.increment(now);em.persist(bucket);return null;
-  });
-  store.purgeExpired(Instant.now());
-  assertThatThrownBy(() -> service.sendEmailCode(new SendEmailVerificationCommand("a@gmail.com","origin")))
-    .isInstanceOf(EmailVerificationException.class).extracting("reason").isEqualTo(EmailVerificationFailure.RATE_LIMITED);
- }
+	@Autowired
+	EntityManager em;
 
- @Test void deliveredCodeIsHashedAndUsableUntilFiveMinuteExpiry() {
-  var result=service.sendEmailCode(new SendEmailVerificationCommand("a@gmail.com","origin"));
-  tx.required(()->{
-   Verification verification=store.lockLatestVerification("a@gmail.com").orElseThrow();
-   assertThat(verification.getCode()).isNotEqualTo("123456");
-   assertThat(verification.validateCode("123456",Instant.now(),2)).isNull();
-   assertThat(result.expiresAt()).isEqualTo(verification.getSentAt().plusSeconds(300));
-   assertThat(result.resendAvailableAt()).isEqualTo(verification.getSentAt().plusSeconds(60));
-   return null;
-  });
- }
+	@Autowired
+	VerificationJpaRepository verifications;
 
- @Test void verificationRowsDoNotShadowLegacySignupOrPasswordResetVerification() {
-  service.sendEmailCode(new SendEmailVerificationCommand("a@gmail.com","origin"));
-  tx.required(()->{
-   em.persist(new Verification("a@gmail.com","654321",VerificationType.SIGN_UP,LocalDateTime.now().plusMinutes(5)));
-   em.persist(new Verification("a@gmail.com","777777",VerificationType.PASSWORD_RESET,LocalDateTime.now().plusMinutes(5)));
-   return null;
-  });
-  assertThat(verifications.findByEmailAndType("a@gmail.com",VerificationType.SIGN_UP).orElseThrow().getCode()).isEqualTo("654321");
-  assertThat(verifications.findByEmailAndType("a@gmail.com",VerificationType.PASSWORD_RESET).orElseThrow().getCode()).isEqualTo("777777");
- }
+	@MockitoBean
+	EmailVerificationPolicyPort policy;
 
- @Test void cleanupPreservesLegacyVerificationWhileRemovingExpiredVerifications() {
-  tx.required(()->{
-   store.saveVerification(Verification.emailVerification("expired","a@gmail.com",Instant.now().minusSeconds(301),60));
-   em.persist(new Verification("legacy@gmail.com","123456",VerificationType.SIGN_UP,LocalDateTime.now().minusMinutes(1)));
-   return null;
-  });
-  store.purgeExpired(Instant.now());
-  assertThat(count("Verification")).isEqualTo(1);
-  assertThat(verifications.findByEmailAndType("legacy@gmail.com",VerificationType.SIGN_UP)).isPresent();
- }
+	@MockitoBean
+	IssueVerificationEmailPort sender;
+
+	@MockitoBean
+	QueryAllowedEmailUseCase allowed;
+
+	@BeforeEach
+	void setup() {
+		tx.required(() -> {
+			em.createQuery("delete from Verification").executeUpdate();
+			em.createQuery("delete from EmailVerificationRateLimit").executeUpdate();
+			em.persist(new EmailVerificationRateLimit("guard",Instant.EPOCH));return null;
+		});
+		when(policy.maxCodeAttempts()).thenReturn(5);
+		when(policy.resendSeconds()).thenReturn(60);
+		when(policy.emailHourlyLimit()).thenReturn(5);when(policy.originHourlyLimit()).thenReturn(30);
+		when(allowed.isEmailAllowed(anyString())).thenReturn(true);
+		when(sender.issueVerificationEmail(anyString())).thenReturn("123456");
+	}
+	long count(String entity) {
+		return tx.required(() -> em.createQuery("select count(e) from "+entity+" e",Long.class).getSingleResult());
+	}
+
+	@Test
+	void changingVerificationIdentifierOrOriginCannotBypassEmailResendCooldown() {
+		service.sendEmailCode(new SendEmailVerificationCommand("a@gmail.com","origin"));
+		assertThatThrownBy(() -> service.sendEmailCode(new SendEmailVerificationCommand("A@gmail.com","other-origin")))
+				.isInstanceOf(EmailVerificationException.class).extracting("reason").isEqualTo(EmailVerificationFailure.RATE_LIMITED);
+		verify(sender,times(1)).issueVerificationEmail(anyString());
+	}
+
+	@Test
+	void failedMailLeavesReservedRateButUnusableVerification() {
+		when(sender.issueVerificationEmail(anyString())).thenThrow(new IllegalStateException("delivery failed"));
+		assertThatThrownBy(() -> service.sendEmailCode(new SendEmailVerificationCommand("a@gmail.com","origin")))
+				.isInstanceOf(EmailVerificationException.class).extracting("reason").isEqualTo(EmailVerificationFailure.EMAIL_SEND_FAILED);
+		assertThat(count("Verification")).isEqualTo(1);
+		assertThat((Instant) tx.required(() -> em.createQuery("select v from Verification v",Verification.class).getSingleResult().getDeliveryCompletedAt())).isNull();
+	}
+
+	@Test
+	void cleanupCannotRemoveARecentSendCooldownAtHourlyWindowBoundary() {
+		Instant now=Instant.now();
+		tx.required(() -> {
+			var bucket=new EmailVerificationRateLimit("email:"+EmailVerificationService.hash("a@gmail.com"),now.minusSeconds(3601));
+			bucket.increment(now);em.persist(bucket);return null;
+		});
+		store.purgeExpired(Instant.now());
+		assertThatThrownBy(() -> service.sendEmailCode(new SendEmailVerificationCommand("a@gmail.com","origin")))
+				.isInstanceOf(EmailVerificationException.class).extracting("reason").isEqualTo(EmailVerificationFailure.RATE_LIMITED);
+	}
+
+	@Test
+	void deliveredCodeIsHashedAndUsableUntilFiveMinuteExpiry() {
+		var result=service.sendEmailCode(new SendEmailVerificationCommand("a@gmail.com","origin"));
+		tx.required(()->{
+			Verification verification=store.lockLatestVerification("a@gmail.com").orElseThrow();
+			assertThat(verification.getCode()).isNotEqualTo("123456");
+			assertThat(verification.validateCode("123456",Instant.now(),2)).isNull();
+			assertThat(result.expiresAt()).isEqualTo(verification.getSentAt().plusSeconds(300));
+			assertThat(result.resendAvailableAt()).isEqualTo(verification.getSentAt().plusSeconds(60));
+			return null;
+		});
+	}
+
+	@Test
+	void verificationRowsDoNotShadowLegacySignupOrPasswordResetVerification() {
+		service.sendEmailCode(new SendEmailVerificationCommand("a@gmail.com","origin"));
+		tx.required(()->{
+			em.persist(new Verification("a@gmail.com","654321",VerificationType.SIGN_UP,LocalDateTime.now().plusMinutes(5)));
+			em.persist(new Verification("a@gmail.com","777777",VerificationType.PASSWORD_RESET,LocalDateTime.now().plusMinutes(5)));
+			return null;
+		});
+		assertThat(verifications.findByEmailAndType("a@gmail.com",VerificationType.SIGN_UP).orElseThrow().getCode()).isEqualTo("654321");
+		assertThat(verifications.findByEmailAndType("a@gmail.com",VerificationType.PASSWORD_RESET).orElseThrow().getCode()).isEqualTo("777777");
+	}
+
+	@Test
+	void cleanupPreservesLegacyVerificationWhileRemovingExpiredVerifications() {
+		tx.required(()->{
+			store.saveVerification(Verification.emailVerification("expired","a@gmail.com",Instant.now().minusSeconds(301),60));
+			em.persist(new Verification("legacy@gmail.com","123456",VerificationType.SIGN_UP,LocalDateTime.now().minusMinutes(1)));
+			return null;
+		});
+		store.purgeExpired(Instant.now());
+		assertThat(count("Verification")).isEqualTo(1);
+		assertThat(verifications.findByEmailAndType("legacy@gmail.com",VerificationType.SIGN_UP)).isPresent();
+	}
 }

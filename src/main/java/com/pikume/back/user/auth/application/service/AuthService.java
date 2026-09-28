@@ -156,7 +156,9 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 			throw new EmailVerificationException(EmailVerificationFailure.TOKEN_INVALID);
 		}
 		String failure = verified.validateToken(Instant.now());
-		if (failure != null) throw new EmailVerificationException(EmailVerificationFailure.valueOf(failure));
+		if (failure != null) {
+			throw new EmailVerificationException(EmailVerificationFailure.valueOf(failure));
+		}
 		return verified;
 	}
 

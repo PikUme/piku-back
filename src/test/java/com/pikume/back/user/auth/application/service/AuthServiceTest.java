@@ -1,5 +1,7 @@
 package com.pikume.back.user.auth.application.service;
 
+import com.pikume.back.user.auth.application.exception.EmailVerificationFailure;
+import com.pikume.back.user.auth.application.exception.EmailVerificationException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -28,7 +30,9 @@ import com.pikume.back.user.domain.exception.InvalidNicknameException;
 import com.pikume.back.user.domain.service.PasswordPolicy;
 
 import java.lang.reflect.Field;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -203,12 +207,12 @@ class AuthServiceTest {
 			given(recordUserAccountPort.recordUserAccount(any(User.class))).willAnswer(invocation -> {
 				Field expiresAt = Verification.class.getDeclaredField("expiresAt");
 				expiresAt.setAccessible(true);
-				expiresAt.set(verified, LocalDateTime.now(java.time.ZoneOffset.UTC).minusSeconds(1));
+				expiresAt.set(verified, LocalDateTime.now(ZoneOffset.UTC).minusSeconds(1));
 				return null;
 			});
 			assertThatThrownBy(() -> authService.signUp(new SignUpCommand("test@piku.store", "abc@123", "테스트", 1L, "test-token")))
-					.isInstanceOf(com.pikume.back.user.auth.application.exception.EmailVerificationException.class)
-					.extracting("reason").isEqualTo(com.pikume.back.user.auth.application.exception.EmailVerificationFailure.TOKEN_EXPIRED);
+					.isInstanceOf(EmailVerificationException.class)
+					.extracting("reason").isEqualTo(EmailVerificationFailure.TOKEN_EXPIRED);
 			assertThat(verified.getConsumedAt()).isNull();
 		}
 
@@ -221,7 +225,7 @@ class AuthServiceTest {
 					.willReturn(Optional.empty());
 
 			assertThatThrownBy(() -> authService.signUp(dto))
-					.isInstanceOf(com.pikume.back.user.auth.application.exception.EmailVerificationException.class);
+					.isInstanceOf(EmailVerificationException.class);
 		}
 	}
 
@@ -381,8 +385,9 @@ class AuthServiceTest {
 					.isInstanceOf(AuthException.class);
 		}
 	}
+
 	private Verification verifiedEmail(String email) {
-		var now = java.time.Instant.now();
+		var now = Instant.now();
 		var verification = Verification.emailVerification("test-id", email, now, 60);
 		verification.activateCode("123456", now);
 		verification.verify(EmailVerificationService.hash("test-token"), now);
