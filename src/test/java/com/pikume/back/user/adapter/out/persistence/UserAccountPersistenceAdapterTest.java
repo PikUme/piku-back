@@ -53,12 +53,12 @@ class UserAccountPersistenceAdapterTest {
 	void loadsPasswordResetUserByEmail() {
 		User user = user("user-1", "user@example.com");
 		Email email = new Email("user@example.com");
-		given(userJpaRepository.findByEmail(email)).willReturn(Optional.of(user));
+		given(userJpaRepository.findByEmailForUpdate(email)).willReturn(Optional.of(user));
 		UserAccountPersistenceAdapter adapter = new UserAccountPersistenceAdapter(userJpaRepository);
 
 		assertThat(adapter.loadPasswordResetUser("user@example.com")).contains(user);
 
-		then(userJpaRepository).should().findByEmail(email);
+		then(userJpaRepository).should().findByEmailForUpdate(email);
 	}
 
 	@Test

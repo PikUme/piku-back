@@ -16,6 +16,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Tag("mysql-migration")
 @DirtiesContext(classMode=DirtiesContext.ClassMode.AFTER_CLASS)
 class EmailVerificationHttpMySqlIntegrationTest extends EmailVerificationHttpIntegrationTest {
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    com.pikume.back.user.auth.application.port.out.PasswordProtectionPort passwords;
     @Container static final MySQLContainer<?> MYSQL=new MySQLContainer<>("mysql:8.4");
     @DynamicPropertySource static void database(DynamicPropertyRegistry properties) {
         properties.add("spring.datasource.url",MYSQL::getJdbcUrl);
@@ -45,4 +47,57 @@ class EmailVerificationHttpMySqlIntegrationTest extends EmailVerificationHttpInt
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM users",Integer.class)).isEqualTo(1);
         } finally {workers.shutdownNow();}
     }
+    @Test void concurrentGuestReservationAndSignupHaveOneNicknameWinner() throws Exception {
+        String owner=proof("owner@gmail.com"), other=proof("other@gmail.com");
+        var workers=Executors.newFixedThreadPool(2);var ready=new CyclicBarrier(2);
+        try {
+            var hold=workers.submit(()->{ready.await(5,TimeUnit.SECONDS);return reserve(owner,"동시닉").andReturn().getResponse().getStatus();});
+            var signup=workers.submit(()->{ready.await(5,TimeUnit.SECONDS);return signup("other@gmail.com",other,"동시닉",characterId).andReturn().getResponse().getStatus();});
+            int reserved=hold.get(15,TimeUnit.SECONDS), created=signup.get(15,TimeUnit.SECONDS);
+            assertThat((reserved==200 && created==409)||(reserved==409 && created==201)).isTrue();
+        } finally {workers.shutdownNow();}
+    }
+    @Test void concurrentReservationAndSignupWithTheSameProofUseOneLockOrder() throws Exception {
+        String token=proof("member@gmail.com");
+        var workers=Executors.newFixedThreadPool(2);var ready=new CyclicBarrier(2);
+        try {
+            var hold=workers.submit(()->{ready.await(5,TimeUnit.SECONDS);return reserve(token,"동시닉").andReturn().getResponse().getStatus();});
+            var signup=workers.submit(()->{ready.await(5,TimeUnit.SECONDS);return signup("member@gmail.com",token,"동시닉",characterId).andReturn().getResponse().getStatus();});
+            assertThat(signup.get(15,TimeUnit.SECONDS)).isEqualTo(201);
+            assertThat(hold.get(15,TimeUnit.SECONDS)).isIn(200,409);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM nickname_holds",Integer.class)).isZero();
+        } finally {workers.shutdownNow();}
+    }
+
+    @Test void passwordResetCannotOverwriteNicknameChangesAndSubsequentGuestReservations() throws Exception {
+        String member=proof("member@gmail.com");
+        signup("member@gmail.com",member,"이전닉",characterId).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isCreated());
+        String memberId=jdbc.queryForObject("SELECT id FROM users WHERE email=?",String.class,"member@gmail.com");
+        assertThat(profiles.reserveIfAvailable("변경닉",memberId)).isTrue();
+        String guest=proof("guest@gmail.com");
+        request("/send-verification/password-reset",java.util.Map.of("email","member@gmail.com"));
+        request("/verify-code",java.util.Map.of("email","member@gmail.com","code","123456","type","PASSWORD_RESET"));
+        var passwordWrite=new CountDownLatch(1);var proceed=new CountDownLatch(1);
+        org.mockito.Mockito.doAnswer(invocation->{
+            passwordWrite.countDown();
+            if (!proceed.await(10,TimeUnit.SECONDS)) throw new IllegalStateException("barrier timed out");
+            return invocation.callRealMethod();
+        }).when(passwords).protect("new@123");
+        var workers=Executors.newFixedThreadPool(2);
+        try {
+            var reset=workers.submit(()->request("/password-reset",java.util.Map.of("email","member@gmail.com","password","new@123")).andReturn().getResponse().getStatus());
+            assertThat(passwordWrite.await(5,TimeUnit.SECONDS)).isTrue();
+            var changed=workers.submit(()->{
+                assertThat(profiles.updateProfile(new com.pikume.back.user.application.dto.UpdateProfileCommand(memberId,"변경닉",null)).success()).isTrue();
+                return reserve(guest,"이전닉").andReturn().getResponse().getStatus();
+            });
+            try { changed.get(300,TimeUnit.MILLISECONDS); } catch (TimeoutException expectedWhileResetOwnsTheUserRow) { }
+            proceed.countDown();
+            assertThat(reset.get(10,TimeUnit.SECONDS)).isEqualTo(200);
+            assertThat(changed.get(10,TimeUnit.SECONDS)).isEqualTo(200);
+            assertThat(jdbc.queryForObject("SELECT nickname FROM users WHERE id=?",String.class,memberId)).isEqualTo("변경닉");
+            signup("guest@gmail.com",guest,"이전닉",characterId).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isCreated());
+        } finally {proceed.countDown();workers.shutdownNow();}
+    }
+
 }

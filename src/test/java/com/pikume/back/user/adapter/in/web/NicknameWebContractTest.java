@@ -105,7 +105,7 @@ class NicknameWebContractTest {
 		jdbc = new JdbcTemplate(source);
 		jdbc.execute("CREATE TABLE nickname_write_mutex (id INT PRIMARY KEY)");
 		jdbc.update("INSERT INTO nickname_write_mutex VALUES (1)");
-		jdbc.execute("CREATE TABLE nickname_holds (nickname VARCHAR(255) PRIMARY KEY, user_id VARCHAR(36) NOT NULL UNIQUE, expires_at TIMESTAMP(6) NOT NULL)");
+		jdbc.execute("CREATE TABLE nickname_holds (nickname VARCHAR(255) PRIMARY KEY, owner_key VARCHAR(64) NOT NULL UNIQUE, expires_at TIMESTAMP(6) NOT NULL)");
 		transactionManager = new DataSourceTransactionManager(source);
 		transaction = transactionManager.getTransaction(new DefaultTransactionDefinition());
 		nicknameHoldAdapter = new NicknameHoldPersistenceAdapter(jdbc);

@@ -44,7 +44,7 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 				.orElseThrow(UserNotFoundException::new);
 		if (user.isWithdrawn()) return false;
 		if (requestedNickname.value().equals(user.getNickname())) {
-			nicknameHoldPort.releaseForUser(userId);
+			nicknameHoldPort.releaseForOwner(userId);
 			return true;
 		}
 		if (checkUserUniquenessPort.isNicknameInUse(requestedNickname)) return false;

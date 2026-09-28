@@ -44,7 +44,7 @@ public class UserAccountPersistenceAdapter implements LoadUserForProfilePort, Lo
 
 	@Override
 	public Optional<User> loadPasswordResetUser(String email) {
-		return jpaRepository.findByEmail(new Email(email));
+		return jpaRepository.findByEmailForUpdate(new Email(email));
 	}
 
 	@Override

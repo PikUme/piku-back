@@ -70,7 +70,7 @@ class UserProfileCommandServiceTest {
 			assertThat(result).isTrue();
 			then(checkUserUniquenessPort).shouldHaveNoInteractions();
 			then(nicknameHoldPort).should().lockNicknameWrites();
-			then(nicknameHoldPort).should().releaseForUser("user-1");
+			then(nicknameHoldPort).should().releaseForOwner("user-1");
 		}
 
 		@Test

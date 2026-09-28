@@ -26,7 +26,7 @@ class NicknameHoldPersistenceAdapterTest {
 		tx = new TransactionTemplate(new DataSourceTransactionManager(source));
 		jdbc.execute("CREATE TABLE nickname_write_mutex (id INT PRIMARY KEY)");
 		jdbc.update("INSERT INTO nickname_write_mutex (id) VALUES (1)");
-		jdbc.execute("CREATE TABLE nickname_holds (nickname VARCHAR(255) PRIMARY KEY, user_id VARCHAR(36) NOT NULL UNIQUE, expires_at TIMESTAMP(6) NOT NULL)");
+		jdbc.execute("CREATE TABLE nickname_holds (nickname VARCHAR(255) PRIMARY KEY, owner_key VARCHAR(64) NOT NULL UNIQUE, expires_at TIMESTAMP(6) NOT NULL)");
 		holds = new NicknameHoldPersistenceAdapter(jdbc);
 	}
 
@@ -48,7 +48,7 @@ class NicknameHoldPersistenceAdapterTest {
 			holds.tryAcquire(new Nickname("timezone"), "user-1", now);
 		});
 		java.time.LocalDateTime stored = jdbc.queryForObject(
-			"SELECT expires_at FROM nickname_holds WHERE user_id = 'user-1'", java.time.LocalDateTime.class);
+			"SELECT expires_at FROM nickname_holds WHERE owner_key = 'user-1'", java.time.LocalDateTime.class);
 		assertThat(stored).isEqualTo(java.time.LocalDateTime.ofInstant(now.plusSeconds(180), java.time.ZoneOffset.UTC));
 	}
 
@@ -63,7 +63,7 @@ class NicknameHoldPersistenceAdapterTest {
 			assertThat(holds.isHeldBy(new Nickname("first"), "user-1", now.plusSeconds(40))).isFalse();
 			assertThat(holds.heldUntil(new Nickname("replacement"), "user-1", now.plusSeconds(40))).contains(now.plusSeconds(220));
 		});
-		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM nickname_holds WHERE user_id = 'user-1'", Integer.class)).isEqualTo(1);
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM nickname_holds WHERE owner_key = 'user-1'", Integer.class)).isEqualTo(1);
 	}
 
 	@Test void failedTransactionRestoresReleasedHold() {

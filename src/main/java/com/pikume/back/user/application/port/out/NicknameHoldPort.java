@@ -7,18 +7,19 @@ import java.util.Optional;
 public interface NicknameHoldPort {
 
 	/** Serialize nickname availability, reservations, and account writes until transaction completion.
-	 * Always acquire before locking a user or reading nickname availability. */
+	 * Acquire after an email verification row, and before user rows or nickname availability reads.
+	 * Owners are user IDs for members and email:{verification UUID} for guests. */
 	void lockNicknameWrites();
 
-	boolean tryAcquire(Nickname nickname, String userId, Instant requestedAt);
+	boolean tryAcquire(Nickname nickname, String ownerKey, Instant requestedAt);
 
-	boolean isHeldBy(Nickname nickname, String userId, Instant checkedAt);
+	boolean isHeldBy(Nickname nickname, String ownerKey, Instant checkedAt);
 
 	boolean isHeld(Nickname nickname, Instant checkedAt);
 
-	Optional<Instant> heldUntil(Nickname nickname, String userId, Instant checkedAt);
+	Optional<Instant> heldUntil(Nickname nickname, String ownerKey, Instant checkedAt);
 
-	void release(Nickname nickname, String userId);
+	void release(Nickname nickname, String ownerKey);
 
-	void releaseForUser(String userId);
+	void releaseForOwner(String ownerKey);
 }

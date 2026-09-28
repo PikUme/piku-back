@@ -8,11 +8,11 @@ import com.pikume.back.user.application.port.out.LoadUserForPasswordResetPort;
 import com.pikume.back.user.application.port.out.RecordUserAccountPort;
 import com.pikume.back.user.auth.application.dto.ResetPasswordCommand;
 import com.pikume.back.user.auth.application.dto.SignUpCommand;
+import com.pikume.back.user.auth.application.dto.NicknameReservationResult;
 import com.pikume.back.user.auth.application.dto.VerifyEmailCommand;
 import com.pikume.back.user.auth.application.port.out.EmailVerificationStorePort;
 import com.pikume.back.user.auth.application.exception.EmailVerificationException;
 import com.pikume.back.user.auth.application.exception.EmailVerificationFailure;
-import java.time.Instant;
 import com.pikume.back.user.auth.application.port.in.ResetPasswordUseCase;
 import com.pikume.back.user.auth.application.port.in.SignUpUseCase;
 import com.pikume.back.user.auth.application.port.in.VerifyEmailUseCase;
@@ -36,7 +36,6 @@ import com.pikume.back.user.domain.exception.InvalidPasswordException;
 import com.pikume.back.user.domain.exception.NicknameAlreadyExistsException;
 import com.pikume.back.user.domain.service.PasswordPolicy;
 import com.pikume.back.user.domain.vo.Email;
-import com.pikume.back.user.domain.vo.Nickname;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -70,16 +69,22 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 		Nickname nickname = new Nickname(command.nickname());
 		requireValidEmail(command.email());
 		requireValidPassword(command.password());
-		Verification verified = requireVerifiedEmail(command.email(), command.emailVerificationToken());
+		Verification verified = requireVerifiedEmail(command.emailVerificationToken());
+		if (!verified.getEmail().equalsIgnoreCase(command.email())) {
+			throw new EmailVerificationException(EmailVerificationFailure.TOKEN_INVALID);
+		}
+		String ownerKey = emailOwnerKey(verified);
 		nicknameHoldPort.lockNicknameWrites();
 		if (checkUserUniquenessPort.isEmailRegistered(command.email())) {
 			throw new AuthException(AuthErrorCode.EMAIL_ALREADY_EXISTS);
 		}
 
-        if (checkUserUniquenessPort.isNicknameInUse(nickname)
-                || nicknameHoldPort.isHeld(nickname, Instant.now())) {
-            throw new AuthException(AuthErrorCode.NICKNAME_ALREADY_EXISTS);
-        }
+		Instant nicknameCheckedAt = Instant.now();
+		if (checkUserUniquenessPort.isNicknameInUse(nickname)
+				|| (nicknameHoldPort.isHeld(nickname, nicknameCheckedAt)
+						&& !nicknameHoldPort.isHeldBy(nickname, ownerKey, nicknameCheckedAt))) {
+			throw new AuthException(AuthErrorCode.NICKNAME_ALREADY_EXISTS);
+		}
 		requireSelectableFixedCharacter(command.fixedCharacterId());
 		User user = new User(
 				command.email(),
@@ -100,7 +105,30 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 			throw new EmailVerificationException(EmailVerificationFailure.valueOf(consumptionFailure));
 		}
 		verified.consumeVerifiedEmail(consumedAt);
+		nicknameHoldPort.releaseForOwner(ownerKey);
 		log.info("event=user_signup outcome=success userId={}", user.getId());
+	}
+
+	@Override
+	@Transactional
+	public NicknameReservationResult reserveNickname(String rawNickname, String emailVerificationToken) {
+		Nickname nickname = new Nickname(rawNickname);
+		Verification verified = requireVerifiedEmail(emailVerificationToken);
+		nicknameHoldPort.lockNicknameWrites();
+		String ownerKey = emailOwnerKey(verified);
+		Instant now = Instant.now();
+		String failure = verified.validateToken(now);
+		if (failure != null) throw new EmailVerificationException(EmailVerificationFailure.valueOf(failure));
+		if (checkUserUniquenessPort.isNicknameInUse(nickname)
+				|| !nicknameHoldPort.tryAcquire(nickname, ownerKey, now)) {
+			throw new AuthException(AuthErrorCode.NICKNAME_ALREADY_EXISTS);
+		}
+		return new NicknameReservationResult(nickname.value(),
+				nicknameHoldPort.heldUntil(nickname, ownerKey, now).orElseThrow());
+	}
+
+	private String emailOwnerKey(Verification verified) {
+		return "email:" + verified.getEmailVerificationId();
 	}
 
 	@Override
@@ -155,15 +183,12 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 		log.info("event=password_reset outcome=success userId={}", user.getId());
 	}
 
-	private Verification requireVerifiedEmail(String email, String token) {
+	private Verification requireVerifiedEmail(String token) {
 		if (token == null || token.isBlank()) {
 			throw new EmailVerificationException(EmailVerificationFailure.TOKEN_INVALID);
 		}
 		Verification verified = emailVerificationStorePort.lockByTokenHash(EmailVerificationService.hash(token))
 				.orElseThrow(() -> new EmailVerificationException(EmailVerificationFailure.TOKEN_INVALID));
-		if (!verified.getEmail().equalsIgnoreCase(email)) {
-			throw new EmailVerificationException(EmailVerificationFailure.TOKEN_INVALID);
-		}
 		String failure = verified.validateToken(Instant.now());
 		if (failure != null) throw new EmailVerificationException(EmailVerificationFailure.valueOf(failure));
 		return verified;

@@ -27,21 +27,21 @@ public class NicknameHoldPersistenceAdapter implements NicknameHoldPort {
 	}
 
 	@Override
-	public boolean tryAcquire(Nickname nickname, String userId, Instant requestedAt) {
+	public boolean tryAcquire(Nickname nickname, String ownerKey, Instant requestedAt) {
 		lockNicknameWrites();
 		jdbc.update("DELETE FROM nickname_holds WHERE expires_at <= ?", utc(requestedAt));
-		if (isHeldBy(nickname, userId, requestedAt)) return true;
+		if (isHeldBy(nickname, ownerKey, requestedAt)) return true;
 		if (isHeld(nickname, requestedAt)) return false;
 		// Only replace the previous reservation after the target is available.
-		jdbc.update("DELETE FROM nickname_holds WHERE user_id = ?", userId);
-		jdbc.update("INSERT INTO nickname_holds (nickname, user_id, expires_at) VALUES (?, ?, ?)",
-			nickname.value(), userId, utc(requestedAt.plus(HOLD_DURATION)));
+		jdbc.update("DELETE FROM nickname_holds WHERE owner_key = ?", ownerKey);
+		jdbc.update("INSERT INTO nickname_holds (nickname, owner_key, expires_at) VALUES (?, ?, ?)",
+			nickname.value(), ownerKey, utc(requestedAt.plus(HOLD_DURATION)));
 		return true;
 	}
 
 	@Override
-	public boolean isHeldBy(Nickname nickname, String userId, Instant checkedAt) {
-		return heldUntil(nickname, userId, checkedAt).isPresent();
+	public boolean isHeldBy(Nickname nickname, String ownerKey, Instant checkedAt) {
+		return heldUntil(nickname, ownerKey, checkedAt).isPresent();
 	}
 
 	@Override
@@ -52,9 +52,9 @@ public class NicknameHoldPersistenceAdapter implements NicknameHoldPort {
 	}
 
 	@Override
-	public Optional<Instant> heldUntil(Nickname nickname, String userId, Instant checkedAt) {
-		return jdbc.query("SELECT expires_at FROM nickname_holds WHERE nickname = ? AND user_id = ? AND expires_at > ?",
-			(row, index) -> row.getObject("expires_at", LocalDateTime.class).toInstant(ZoneOffset.UTC), nickname.value(), userId, utc(checkedAt))
+	public Optional<Instant> heldUntil(Nickname nickname, String ownerKey, Instant checkedAt) {
+		return jdbc.query("SELECT expires_at FROM nickname_holds WHERE nickname = ? AND owner_key = ? AND expires_at > ?",
+			(row, index) -> row.getObject("expires_at", LocalDateTime.class).toInstant(ZoneOffset.UTC), nickname.value(), ownerKey, utc(checkedAt))
 			.stream().findFirst();
 	}
 
@@ -63,12 +63,12 @@ public class NicknameHoldPersistenceAdapter implements NicknameHoldPort {
 	}
 
 	@Override
-	public void releaseForUser(String userId) {
-		jdbc.update("DELETE FROM nickname_holds WHERE user_id = ?", userId);
+	public void releaseForOwner(String ownerKey) {
+		jdbc.update("DELETE FROM nickname_holds WHERE owner_key = ?", ownerKey);
 	}
 
 	@Override
-	public void release(Nickname nickname, String userId) {
-		jdbc.update("DELETE FROM nickname_holds WHERE nickname = ? AND user_id = ?", nickname.value(), userId);
+	public void release(Nickname nickname, String ownerKey) {
+		jdbc.update("DELETE FROM nickname_holds WHERE nickname = ? AND owner_key = ?", nickname.value(), ownerKey);
 	}
 }

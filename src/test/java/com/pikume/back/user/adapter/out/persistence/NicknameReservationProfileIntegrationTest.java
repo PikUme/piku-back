@@ -25,7 +25,7 @@ class NicknameReservationProfileIntegrationTest {
  @MockitoBean ResolveFixedCharacterAvatarPort characters;
  @BeforeEach void setup() {
   jdbc.execute("CREATE TABLE IF NOT EXISTS nickname_write_mutex (id INT PRIMARY KEY)");
-  jdbc.execute("CREATE TABLE IF NOT EXISTS nickname_holds (nickname VARCHAR(255) PRIMARY KEY, user_id VARCHAR(36) NOT NULL UNIQUE, expires_at TIMESTAMP(6) NOT NULL)");
+  jdbc.execute("CREATE TABLE IF NOT EXISTS nickname_holds (nickname VARCHAR(255) PRIMARY KEY, owner_key VARCHAR(64) NOT NULL UNIQUE, expires_at TIMESTAMP(6) NOT NULL)");
   jdbc.update("MERGE INTO nickname_write_mutex (id) KEY(id) VALUES (1)");
   jdbc.update("DELETE FROM nickname_holds");
   users.deleteAll();
