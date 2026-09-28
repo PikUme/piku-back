@@ -53,6 +53,10 @@ import org.springframework.web.method.support.ModelAndViewContainer;
 
 import java.util.HashSet;
 import java.util.Optional;
+import com.pikume.back.user.auth.application.port.out.EmailVerificationStorePort;
+import com.pikume.back.user.auth.application.port.in.EmailVerificationUseCase;
+import com.pikume.back.user.auth.domain.Verification;
+import com.pikume.back.user.auth.application.service.EmailVerificationService;
 import java.util.Set;
 import java.util.stream.Stream;
 
@@ -77,6 +81,7 @@ class NicknameWebContractTest {
 	private TestUserAccountStore userAccountStore;
 	private InMemoryNicknameHoldAdapter nicknameHoldAdapter;
 	private LoadCompletedEmailVerificationPort loadCompletedEmailVerificationPort;
+	private EmailVerificationStorePort emailVerificationStorePort;
 	private CheckSignUpCharacterSelectionPort checkSignUpCharacterSelectionPort;
 	private PasswordProtectionPort passwordProtectionPort;
 	private ResolveFixedCharacterAvatarPort fixedCharacterAvatarPort;
@@ -87,6 +92,7 @@ class NicknameWebContractTest {
 		userAccountStore = new TestUserAccountStore();
 		nicknameHoldAdapter = new InMemoryNicknameHoldAdapter(new NicknamePolicy());
 		loadCompletedEmailVerificationPort = mock(LoadCompletedEmailVerificationPort.class);
+		emailVerificationStorePort = mock(EmailVerificationStorePort.class);
 		checkSignUpCharacterSelectionPort = mock(CheckSignUpCharacterSelectionPort.class);
 		passwordProtectionPort = mock(PasswordProtectionPort.class);
 		fixedCharacterAvatarPort = mock(ResolveFixedCharacterAvatarPort.class);
@@ -104,7 +110,7 @@ class NicknameWebContractTest {
 				mock(IssueVerificationEmailPort.class),
 				passwordProtectionPort,
 				checkSignUpCharacterSelectionPort,
-				queryAllowedEmailUseCase,
+				emailVerificationStorePort,
 				new EmailVerificationPolicy(),
 				new PasswordPolicy());
 		UserProfileCommandService profileService = new UserProfileCommandService(
@@ -119,7 +125,7 @@ class NicknameWebContractTest {
 				authService,
 				authService,
 				authService,
-				queryAllowedEmailUseCase);
+				queryAllowedEmailUseCase, mock(EmailVerificationUseCase.class));
 		UserController userController = new UserController(
 				mock(QueryUserProfileUseCase.class),
 				profileService,
@@ -150,7 +156,7 @@ class NicknameWebContractTest {
 			mockMvc.perform(post("/api/auth/signup")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
-								{"email":"user@example.com","password":"abc@123","nickname":" 12345678901234567890 ","fixedCharacterId":1}
+								{"email":"user@example.com","password":"abc@123","nickname":" 12345678901234567890 ","fixedCharacterId":1,"emailVerificationToken":"test-token"}
 								"""))
 					.andExpect(status().isCreated())
 					.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
@@ -166,7 +172,7 @@ class NicknameWebContractTest {
 			ResultActions result = mockMvc.perform(post("/api/auth/signup")
 					.contentType(MediaType.APPLICATION_JSON)
 					.content("""
-							{"email":"user@example.com","password":"abc@123","nickname":"%s","fixedCharacterId":1}
+							{"email":"user@example.com","password":"abc@123","nickname":"%s","fixedCharacterId":1,"emailVerificationToken":"test-token"}
 							""".formatted(nickname)));
 
 			assertValidationProblem(result, detail, "/api/auth/signup");
@@ -178,7 +184,7 @@ class NicknameWebContractTest {
 			ResultActions result = mockMvc.perform(post("/api/auth/signup")
 					.contentType(MediaType.APPLICATION_JSON)
 					.content("""
-							{"email":"user@example.com","password":"abc@123","fixedCharacterId":1}
+							{"email":"user@example.com","password":"abc@123","fixedCharacterId":1,"emailVerificationToken":"test-token"}
 							"""));
 
 			assertValidationProblem(result, "닉네임은 필수 값입니다.", "/api/auth/signup");
@@ -193,7 +199,7 @@ class NicknameWebContractTest {
 			mockMvc.perform(post("/api/auth/signup")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
-								{"email":"user@example.com","password":"abc@123","nickname":" 중복닉 ","fixedCharacterId":1}
+								{"email":"user@example.com","password":"abc@123","nickname":" 중복닉 ","fixedCharacterId":1,"emailVerificationToken":"test-token"}
 								"""))
 					.andExpect(status().isConflict())
 					.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
@@ -386,8 +392,11 @@ class NicknameWebContractTest {
 	}
 
 	private void prepareSignup(String email) {
-		given(loadCompletedEmailVerificationPort.loadLatestVerification(email, VerificationType.SIGN_UP))
-				.willReturn(Optional.of(new VerifiedEmail(email, VerificationType.SIGN_UP)));
+		var now = java.time.Instant.now();
+		var verification = Verification.emailVerification("test-id", email, now, 60);
+		verification.activateCode("123456", now);
+		verification.verify(EmailVerificationService.hash("test-token"), now);
+		given(emailVerificationStorePort.lockByTokenHash(EmailVerificationService.hash("test-token"))).willReturn(Optional.of(verification));
 		given(checkSignUpCharacterSelectionPort.isSelectableFixedCharacter(1L)).willReturn(true);
 		given(passwordProtectionPort.protect("abc@123")).willReturn("encoded-password");
 	}

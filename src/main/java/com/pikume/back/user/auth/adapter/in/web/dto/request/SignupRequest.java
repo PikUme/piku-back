@@ -17,4 +17,7 @@ public class SignupRequest {
 	private String nickname;
 	@NotNull(message = "캐릭터 선택은 필수입니다.")
 	private Long fixedCharacterId;
+	@NotBlank(message = "이메일 인증은 필수입니다.")
+	@lombok.ToString.Exclude
+	private String emailVerificationToken;
 }

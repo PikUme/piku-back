@@ -9,14 +9,14 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import java.time.Instant;
 
-@Entity @Table(name="signup_rate_limits")
+@Entity @Table(name="email_verification_rate_limits")
 @Getter @NoArgsConstructor(access=AccessLevel.PROTECTED)
-class SignupRateLimit {
+class EmailVerificationRateLimit {
     @Id @Column(length=70) private String bucketKey;
     @Column(nullable=false) private Instant windowStartedAt;
     @Column(nullable=false) private int sendCount;
     private Instant lastSentAt;
-    SignupRateLimit(String key, Instant now) {
+    EmailVerificationRateLimit(String key, Instant now) {
         bucketKey=key;
         windowStartedAt=now;
     }

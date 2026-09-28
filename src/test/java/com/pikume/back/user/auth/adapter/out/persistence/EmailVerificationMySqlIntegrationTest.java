@@ -1,8 +1,8 @@
 package com.pikume.back.user.auth.adapter.out.persistence;
 
-import com.pikume.back.user.auth.application.dto.EmailSignupChallengeCommand;
-import com.pikume.back.user.auth.application.dto.EmailSignupChallengeResult;
-import com.pikume.back.user.auth.application.exception.SignupFlowException;
+import com.pikume.back.user.auth.application.dto.SendEmailVerificationCommand;
+import com.pikume.back.user.auth.application.dto.EmailVerificationDelivery;
+import com.pikume.back.user.auth.application.exception.EmailVerificationException;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
@@ -20,7 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Tag("mysql-migration")
 @AutoConfigureTestDatabase(replace=AutoConfigureTestDatabase.Replace.NONE)
 @DirtiesContext(classMode=DirtiesContext.ClassMode.AFTER_CLASS)
-class SignupEmailMySqlIntegrationTest extends SignupEmailPersistenceIntegrationTest {
+class EmailVerificationMySqlIntegrationTest extends EmailVerificationPersistenceIntegrationTest {
  @Container static final MySQLContainer<?> MYSQL=new MySQLContainer<>("mysql:8.4");
  @DynamicPropertySource static void database(DynamicPropertyRegistry properties) {
   properties.add("spring.datasource.url",MYSQL::getJdbcUrl);
@@ -38,12 +38,12 @@ class SignupEmailMySqlIntegrationTest extends SignupEmailPersistenceIntegrationT
   try {
    List<Future<Object>> requests=List.of("first-origin","second-origin").stream().map(origin->workers.submit(()->{
     ready.await(5,TimeUnit.SECONDS);
-    try {return (Object)service.sendEmailCode(new EmailSignupChallengeCommand("a@gmail.com","caller",origin,null));}
-    catch(SignupFlowException error) {return error.getReason();}
+    try {return (Object)service.sendEmailCode(new SendEmailVerificationCommand("a@gmail.com",origin));}
+    catch(EmailVerificationException error) {return error.getReason();}
    })).toList();
    var results=List.of(requests.get(0).get(15,TimeUnit.SECONDS),requests.get(1).get(15,TimeUnit.SECONDS));
-   assertThat(results.stream().filter(EmailSignupChallengeResult.class::isInstance)).hasSize(1);
-   assertThat(results).contains(com.pikume.back.user.auth.application.exception.SignupFailure.RATE_LIMITED);
+   assertThat(results.stream().filter(EmailVerificationDelivery.class::isInstance)).hasSize(1);
+   assertThat(results).contains(com.pikume.back.user.auth.application.exception.EmailVerificationFailure.RATE_LIMITED);
    assertThat(count("Verification")).isEqualTo(1);
   } finally {workers.shutdownNow();}
  }

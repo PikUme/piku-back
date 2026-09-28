@@ -6,7 +6,10 @@ import com.pikume.back.user.application.port.out.RecordUserAccountPort;
 import com.pikume.back.user.auth.application.dto.ResetPasswordCommand;
 import com.pikume.back.user.auth.application.dto.SignUpCommand;
 import com.pikume.back.user.auth.application.dto.VerifyEmailCommand;
-import com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase;
+import com.pikume.back.user.auth.application.port.out.EmailVerificationStorePort;
+import com.pikume.back.user.auth.application.exception.EmailVerificationException;
+import com.pikume.back.user.auth.application.exception.EmailVerificationFailure;
+import java.time.Instant;
 import com.pikume.back.user.auth.application.port.in.ResetPasswordUseCase;
 import com.pikume.back.user.auth.application.port.in.SignUpUseCase;
 import com.pikume.back.user.auth.application.port.in.VerifyEmailUseCase;
@@ -53,7 +56,7 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 	private final IssueVerificationEmailPort issueVerificationEmailPort;
 	private final PasswordProtectionPort passwordProtectionPort;
 	private final CheckSignUpCharacterSelectionPort checkSignUpCharacterSelectionPort;
-	private final QueryAllowedEmailUseCase queryAllowedEmailUseCase;
+	private final EmailVerificationStorePort emailVerificationStorePort;
 	private final EmailVerificationPolicy emailVerificationPolicy;
 	private final PasswordPolicy passwordPolicy;
 
@@ -63,11 +66,11 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 		Nickname nickname = new Nickname(command.nickname());
 		requireValidEmail(command.email());
 		requireValidPassword(command.password());
+		Verification verified = requireVerifiedEmail(command.email(), command.emailVerificationToken());
 		if (checkUserUniquenessPort.isEmailRegistered(command.email())) {
 			throw new AuthException(AuthErrorCode.EMAIL_ALREADY_EXISTS);
 		}
 
-		VerifiedEmail verified = getValidVerifiedEmail(command.email(), VerificationType.SIGN_UP);
 		requireSelectableFixedCharacter(command.fixedCharacterId());
 		User user = new User(
 				command.email(),
@@ -75,8 +78,6 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 				nickname,
 				command.fixedCharacterId());
 
-		verified.markUsed();
-		recordCompletedEmailVerificationPort.recordCompletedVerification(verified);
 		try {
 			recordUserAccountPort.recordUserAccount(user);
 		} catch (EmailAlreadyExistsException exception) {
@@ -84,20 +85,13 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 		} catch (NicknameAlreadyExistsException exception) {
 			throw new AuthException(AuthErrorCode.NICKNAME_ALREADY_EXISTS);
 		}
+		Instant consumedAt = Instant.now();
+		String consumptionFailure = verified.validateToken(consumedAt);
+		if (consumptionFailure != null) {
+			throw new EmailVerificationException(EmailVerificationFailure.valueOf(consumptionFailure));
+		}
+		verified.consumeVerifiedEmail(consumedAt);
 		log.info("event=user_signup outcome=success userId={}", user.getId());
-	}
-
-	@Override
-	@Transactional
-	public void sendSignUpVerificationEmail(String email) {
-		requireValidEmail(email);
-		if (!queryAllowedEmailUseCase.isEmailAllowed(email)) {
-			throw new AuthException(AuthErrorCode.INVALID_EMAIL);
-		}
-		if (checkUserUniquenessPort.isEmailRegistered(email)) {
-			log.info("event=verification_request outcome=accepted reason=email_already_registered");
-		}
-		saveVerificationCode(email, issueVerificationEmailPort.issueVerificationEmail(email), VerificationType.SIGN_UP);
 	}
 
 	@Override
@@ -116,6 +110,9 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 	@Override
 	@Transactional
 	public void verifyCode(VerifyEmailCommand command) {
+		if (command.type() != VerificationType.PASSWORD_RESET) {
+			throw new AuthException(AuthErrorCode.VERIFICATION_NOT_FOUND);
+		}
 		requireValidEmail(command.email());
 		Verification verification = loadVerificationPort.loadVerification(command.email(), command.type())
 				.orElseThrow(() -> new AuthException(AuthErrorCode.VERIFICATION_NOT_FOUND));
@@ -147,6 +144,20 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 		user.updatePassword(passwordProtectionPort.protect(command.newPassword()));
 		recordUserAccountPort.recordUserAccount(user);
 		log.info("event=password_reset outcome=success userId={}", user.getId());
+	}
+
+	private Verification requireVerifiedEmail(String email, String token) {
+		if (token == null || token.isBlank()) {
+			throw new EmailVerificationException(EmailVerificationFailure.TOKEN_INVALID);
+		}
+		Verification verified = emailVerificationStorePort.lockByTokenHash(EmailVerificationService.hash(token))
+				.orElseThrow(() -> new EmailVerificationException(EmailVerificationFailure.TOKEN_INVALID));
+		if (!verified.getEmail().equalsIgnoreCase(email)) {
+			throw new EmailVerificationException(EmailVerificationFailure.TOKEN_INVALID);
+		}
+		String failure = verified.validateToken(Instant.now());
+		if (failure != null) throw new EmailVerificationException(EmailVerificationFailure.valueOf(failure));
+		return verified;
 	}
 
 	private void saveVerificationCode(String email, String code, VerificationType type) {
