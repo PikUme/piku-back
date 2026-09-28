@@ -51,7 +51,8 @@ import org.springframework.web.context.request.NativeWebRequest;
 import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.method.support.ModelAndViewContainer;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.HashSet;
 import java.util.Optional;
 import com.pikume.back.user.auth.application.port.out.EmailVerificationStorePort;
@@ -393,7 +394,7 @@ class NicknameWebContractTest {
 	}
 
 	private void prepareSignup(String email) {
-		var now = Instant.now();
+		var now = LocalDateTime.now(ZoneId.of("Asia/Seoul"));
 		var verification = Verification.emailVerification("test-id", email, now, 60);
 		verification.activateCode("123456", now);
 		verification.verify(EmailVerificationService.hash("test-token"), now);

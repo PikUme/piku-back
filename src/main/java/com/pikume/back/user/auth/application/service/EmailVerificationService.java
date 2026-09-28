@@ -21,8 +21,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
-import java.time.Instant;
-import java.time.ZoneOffset;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.Locale;
@@ -38,6 +39,8 @@ import static com.pikume.back.user.auth.application.exception.EmailVerificationF
 @Service
 @RequiredArgsConstructor
 public class EmailVerificationService implements EmailVerificationUseCase {
+
+	private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
 	private static final SecureRandom RANDOM = new SecureRandom();
 
@@ -66,7 +69,7 @@ public class EmailVerificationService implements EmailVerificationUseCase {
 	private DeliveryReservation reserveDelivery(String email, String requestOriginKey) {
 		return transactions.required(() -> {
 			// 첫 발송과 재발송 모두 발송 제한 잠금을 먼저 얻은 뒤 인증 행을 잠근다.
-			Instant now = store.reserveEmailSend(
+			LocalDateTime now = store.reserveEmailSend(
 					hash(email.toLowerCase(Locale.ROOT)), hash(requestOriginKey),
 					policy.emailHourlyLimit(), policy.originHourlyLimit(), policy.resendSeconds());
 			Verification verification = store.lockLatestVerification(email).orElse(null);
@@ -103,13 +106,13 @@ public class EmailVerificationService implements EmailVerificationUseCase {
 					|| verification.getVerifiedAt() != null) {
 				throw fail(VERIFICATION_INVALID);
 			}
-			Instant now = Instant.now();
-			if (!now.isBefore(verification.getExpiresAt().toInstant(ZoneOffset.UTC))) {
+			LocalDateTime now = LocalDateTime.now(KST).truncatedTo(ChronoUnit.MICROS);
+			if (!now.isBefore(verification.getExpiresAt())) {
 				throw fail(CODE_EXPIRED);
 			}
 			verification.activateCode(code, now);
 			return new EmailVerificationDelivery(
-					verification.getExpiresAt().toInstant(ZoneOffset.UTC), verification.getResendAvailableAt());
+					verification.getExpiresAt(), verification.getResendAvailableAt());
 		});
 	}
 
@@ -119,7 +122,7 @@ public class EmailVerificationService implements EmailVerificationUseCase {
 		Attempt attempt = transactions.required(() -> {
 			Verification verification = store.lockLatestVerification(email)
 					.orElseThrow(() -> fail(VERIFICATION_INVALID));
-			Instant now = Instant.now();
+			LocalDateTime now = LocalDateTime.now(KST).truncatedTo(ChronoUnit.MICROS);
 			String failure = verification.validateCode(command.code(), now, policy.maxCodeAttempts());
 			if (failure != null) {
 				return new Attempt(EmailVerificationFailure.valueOf(failure), null);
@@ -129,7 +132,7 @@ public class EmailVerificationService implements EmailVerificationUseCase {
 			String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
 			verification.verify(hash(token), now);
 			return new Attempt(null, new EmailVerificationResult(
-					token, verification.getExpiresAt().toInstant(ZoneOffset.UTC)));
+					token, verification.getExpiresAt()));
 		});
 		// 오입력 횟수를 먼저 커밋한 뒤 오류를 반환해야 다음 요청에도 제한이 적용된다.
 		if (attempt.failure() != null) {
@@ -140,7 +143,7 @@ public class EmailVerificationService implements EmailVerificationUseCase {
 
 	@Override
 	public void purgeExpiredVerifications() {
-		store.purgeExpired(Instant.now());
+		store.purgeExpired(LocalDateTime.now(KST).truncatedTo(ChronoUnit.MICROS));
 	}
 
 	private String validEmail(String email) {
@@ -171,7 +174,7 @@ public class EmailVerificationService implements EmailVerificationUseCase {
 		return new EmailVerificationException(reason);
 	}
 
-	private record DeliveryReservation(String id, Instant sentAt) {}
+	private record DeliveryReservation(String id, LocalDateTime sentAt) {}
 
 	private record Attempt(EmailVerificationFailure failure, EmailVerificationResult result) {}
 }

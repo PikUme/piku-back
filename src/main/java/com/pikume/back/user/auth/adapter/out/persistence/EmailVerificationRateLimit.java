@@ -7,7 +7,7 @@ import jakarta.persistence.Table;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import java.time.Instant;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "email_verification_rate_limits")
@@ -20,26 +20,26 @@ class EmailVerificationRateLimit {
 	private String bucketKey;
 
 	@Column(nullable = false)
-	private Instant windowStartedAt;
+	private LocalDateTime windowStartedAt;
 
 	@Column(nullable = false)
 	private int sendCount;
 
-	private Instant lastSentAt;
+	private LocalDateTime lastSentAt;
 
-	EmailVerificationRateLimit(String key, Instant now) {
+	EmailVerificationRateLimit(String key, LocalDateTime now) {
 		bucketKey = key;
 		windowStartedAt = now;
 	}
 
-	void resetIfExpired(Instant now) {
+	void resetIfExpired(LocalDateTime now) {
 		if (!now.isBefore(windowStartedAt.plusSeconds(3600))) {
 			windowStartedAt = now;
 			sendCount = 0;
 		}
 	}
 
-	void increment(Instant now) {
+	void increment(LocalDateTime now) {
 		sendCount++;
 		lastSentAt = now;
 	}

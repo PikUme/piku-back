@@ -9,7 +9,6 @@ import com.pikume.back.user.auth.application.dto.VerifyEmailCommand;
 import com.pikume.back.user.auth.application.port.out.EmailVerificationStorePort;
 import com.pikume.back.user.auth.application.exception.EmailVerificationException;
 import com.pikume.back.user.auth.application.exception.EmailVerificationFailure;
-import java.time.Instant;
 import com.pikume.back.user.auth.application.port.in.ResetPasswordUseCase;
 import com.pikume.back.user.auth.application.port.in.SignUpUseCase;
 import com.pikume.back.user.auth.application.port.in.VerifyEmailUseCase;
@@ -40,11 +39,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPasswordUseCase {
+
+	private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
 	private final LoadUserForPasswordResetPort loadUserForPasswordResetPort;
 	private final CheckUserUniquenessPort checkUserUniquenessPort;
@@ -85,7 +88,7 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 		} catch (NicknameAlreadyExistsException exception) {
 			throw new AuthException(AuthErrorCode.NICKNAME_ALREADY_EXISTS);
 		}
-		Instant consumedAt = Instant.now();
+		LocalDateTime consumedAt = LocalDateTime.now(KST).truncatedTo(ChronoUnit.MICROS);
 		String consumptionFailure = verified.validateToken(consumedAt);
 		if (consumptionFailure != null) {
 			throw new EmailVerificationException(EmailVerificationFailure.valueOf(consumptionFailure));
@@ -155,7 +158,7 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 		if (!verified.getEmail().equalsIgnoreCase(email)) {
 			throw new EmailVerificationException(EmailVerificationFailure.TOKEN_INVALID);
 		}
-		String failure = verified.validateToken(Instant.now());
+		String failure = verified.validateToken(LocalDateTime.now(KST).truncatedTo(ChronoUnit.MICROS));
 		if (failure != null) {
 			throw new EmailVerificationException(EmailVerificationFailure.valueOf(failure));
 		}

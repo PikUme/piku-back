@@ -48,10 +48,7 @@ public class AuthController {
 			@ApiResponse(responseCode = "400", description = "잘못된 요청")
 	})
 	@PostMapping("/signup")
-	public ResponseEntity<?> signup(
-			@Valid
-			@RequestBody
-			SignupRequest dto) {
+	public ResponseEntity<?> signup(@Valid @RequestBody SignupRequest dto) {
 		signUpUseCase.signUp(new SignUpCommand(
 				dto.getEmail(), dto.getPassword(), dto.getNickname(), dto.getFixedCharacterId(), dto.getEmailVerificationToken()));
 		return ResponseEntity.status(HttpStatus.CREATED).body(new MessageResponse("회원가입 성공"));
@@ -64,9 +61,7 @@ public class AuthController {
 	})
 	@PostMapping("/send-verification/sign-up")
 	public ResponseEntity<?> sendSignUpVerificationEmail(
-			@Valid
-			@RequestBody
-			VerificationEmailRequest request,
+			@Valid @RequestBody VerificationEmailRequest request,
 			HttpServletRequest httpRequest) {
 		var result = emailVerificationUseCase.sendEmailCode(new SendEmailVerificationCommand(request.email(), httpRequest.getRemoteAddr()));
 		return ResponseEntity.ok().header("Cache-Control", "no-store").body(Map.of(
@@ -87,10 +82,7 @@ public class AuthController {
 
 	@Operation(summary = "이메일 인증 코드 검증", description = "사용자가 입력한 인증 코드를 검증합니다.")
 	@PostMapping("/verify-code")
-	public ResponseEntity<?> verifyCode(
-			@Valid
-			@RequestBody
-			EmailValidRequest dto) {
+	public ResponseEntity<?> verifyCode(@Valid @RequestBody EmailValidRequest dto) {
 		if (dto.getType() == VerificationType.SIGN_UP) {
 			var result = emailVerificationUseCase.verifyEmailCode(new VerifyEmailCodeCommand(dto.getEmail(), dto.getCode()));
 			return ResponseEntity.ok().header("Cache-Control", "no-store").body(Map.of(

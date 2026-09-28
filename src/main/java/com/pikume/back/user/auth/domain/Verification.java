@@ -6,8 +6,6 @@ import lombok.NoArgsConstructor;
 import com.pikume.back.user.auth.domain.vo.VerificationType;
 import com.pikume.back.user.domain.vo.Email;
 import java.time.LocalDateTime;
-import java.time.Instant;
-import java.time.ZoneOffset;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -29,7 +27,7 @@ public class Verification {
 	@Column(nullable = false)
 	private String code;
 
-	// 기존 비밀번호 재설정과 만료 컬럼을 공유하며, 회원가입에서는 UTC로 변환해 저장하고 비교한다.
+	// 회원가입 인증의 발송·만료·소비 시각은 모두 한국 시간으로 저장하고 비교한다.
 	@Column(nullable = false)
 	private LocalDateTime expiresAt;
 
@@ -45,25 +43,25 @@ public class Verification {
 
 	private Integer attempts;
 
-	private Instant sentAt;
+	private LocalDateTime sentAt;
 
-	private Instant resendAvailableAt;
+	private LocalDateTime resendAvailableAt;
 
-	private Instant deliveryCompletedAt;
+	private LocalDateTime deliveryCompletedAt;
 
-	private Instant verifiedAt;
+	private LocalDateTime verifiedAt;
 
-	private Instant consumedAt;
+	private LocalDateTime consumedAt;
 
-	public static Verification emailVerification(String id, String email, Instant now, int resendSeconds) {
+	public static Verification emailVerification(String id, String email, LocalDateTime now, int resendSeconds) {
 		Verification verification = new Verification(email, "PENDING", VerificationType.SIGN_UP,
-				LocalDateTime.ofInstant(now.plusSeconds(300), ZoneOffset.UTC));
+				now.plusSeconds(300));
 		verification.emailVerificationId = id;
 		verification.restart(now, resendSeconds);
 		return verification;
 	}
 
-	public void restart(Instant now, int resendSeconds) {
+	public void restart(LocalDateTime now, int resendSeconds) {
 		if (verifiedAt != null) {
 			throw new IllegalStateException("Verified email cannot be restarted");
 		}
@@ -72,23 +70,23 @@ public class Verification {
 		sentAt = now;
 		resendAvailableAt = now.plusSeconds(resendSeconds);
 		deliveryCompletedAt = null;
-		expiresAt = LocalDateTime.ofInstant(now.plusSeconds(300), ZoneOffset.UTC);
+		expiresAt = now.plusSeconds(300);
 	}
 
-	public void activateCode(String rawCode, Instant now) {
+	public void activateCode(String rawCode, LocalDateTime now) {
 		code = hash(rawCode);
 		deliveryCompletedAt = now;
 	}
 
 	// 예외 대신 실패 사유를 반환해, 서비스에서 오입력 횟수를 커밋한 뒤 오류를 전달한다.
-	public String validateCode(String submittedCode, Instant now, int maxAttempts) {
+	public String validateCode(String submittedCode, LocalDateTime now, int maxAttempts) {
 		if (emailVerificationId == null || type != VerificationType.SIGN_UP || deliveryCompletedAt == null) {
 			return "VERIFICATION_INVALID";
 		}
 		if (verifiedAt != null) {
 			return "VERIFICATION_ALREADY_COMPLETED";
 		}
-		if (!now.isBefore(expiresAt.toInstant(ZoneOffset.UTC))) {
+		if (!now.isBefore(expiresAt)) {
 			return "CODE_EXPIRED";
 		}
 		if (attempts >= maxAttempts) {
@@ -102,21 +100,21 @@ public class Verification {
 		return null;
 	}
 
-	public void verify(String tokenHash, Instant now) {
+	public void verify(String tokenHash, LocalDateTime now) {
 		if (verifiedAt != null || consumedAt != null) {
 			throw new IllegalStateException("Email already verified");
 		}
 		verificationTokenHash = tokenHash;
 		verifiedAt = now;
 		code = "VERIFIED";
-		expiresAt = LocalDateTime.ofInstant(now.plusSeconds(600), ZoneOffset.UTC);
+		expiresAt = now.plusSeconds(600);
 	}
 
-	public String validateToken(Instant now) {
+	public String validateToken(LocalDateTime now) {
 		if (type != VerificationType.SIGN_UP || verifiedAt == null || verificationTokenHash == null) {
 			return "TOKEN_INVALID";
 		}
-		if (!now.isBefore(expiresAt.toInstant(ZoneOffset.UTC))) {
+		if (!now.isBefore(expiresAt)) {
 			return "TOKEN_EXPIRED";
 		}
 		if (consumedAt != null) {
@@ -125,7 +123,7 @@ public class Verification {
 		return null;
 	}
 
-	public void consumeVerifiedEmail(Instant now) {
+	public void consumeVerifiedEmail(LocalDateTime now) {
 		if (validateToken(now) != null) {
 			throw new IllegalStateException("Email verification is not usable");
 		}

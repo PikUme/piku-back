@@ -23,9 +23,8 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
-import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -71,7 +70,7 @@ class EmailVerificationHttpIntegrationTest {
 			em.createQuery("delete from AllowedEmail").executeUpdate();
 			em.createQuery("delete from User").executeUpdate();
 			em.createQuery("delete from Character").executeUpdate();
-			jdbc.update("INSERT INTO email_verification_rate_limits (bucket_key,window_started_at,send_count) VALUES ('guard',?,0)", Timestamp.from(Instant.EPOCH));
+			jdbc.update("INSERT INTO email_verification_rate_limits (bucket_key,window_started_at,send_count) VALUES ('guard',?,0)", LocalDateTime.of(1970, 1, 1, 0, 0));
 			jdbc.update("INSERT INTO allowed_email (domain) VALUES ('gmail.com')");
 			var character=Character.fixed("https://example.com/fixed.webp");em.persist(character);em.flush();
 			return character.getId();
@@ -104,7 +103,7 @@ class EmailVerificationHttpIntegrationTest {
 	void allowResend() {
 		transactions.required(() -> {
 			em.createQuery("update EmailVerificationRateLimit b set b.lastSentAt=:sent where b.bucketKey<>'guard'")
-					.setParameter("sent",Instant.now().minusSeconds(61)).executeUpdate();
+					.setParameter("sent",LocalDateTime.now(ZoneId.of("Asia/Seoul")).minusSeconds(61)).executeUpdate();
 			return null;
 		});
 	}
@@ -150,10 +149,10 @@ class EmailVerificationHttpIntegrationTest {
 	@Test
 	void expiredCodeAndTokenReturnExplicitRecoveryErrors() throws Exception {
 		send("member@gmail.com");
-		jdbc.update("UPDATE verification SET expires_at=?",LocalDateTime.ofInstant(Instant.now().minusSeconds(1),ZoneOffset.UTC));
+		jdbc.update("UPDATE verification SET expires_at=?",LocalDateTime.now(ZoneId.of("Asia/Seoul")).minusSeconds(1));
 		verify("member@gmail.com","123456").andExpect(status().isGone()).andExpect(jsonPath("$.code").value("CODE_EXPIRED"));
 		String token=proof("other@gmail.com");
-		jdbc.update("UPDATE verification SET expires_at=? WHERE email=?",LocalDateTime.ofInstant(Instant.now().minusSeconds(1),ZoneOffset.UTC),"other@gmail.com");
+		jdbc.update("UPDATE verification SET expires_at=? WHERE email=?",LocalDateTime.now(ZoneId.of("Asia/Seoul")).minusSeconds(1),"other@gmail.com");
 		signup("other@gmail.com",token,"회원",characterId).andExpect(status().isGone()).andExpect(jsonPath("$.code").value("TOKEN_EXPIRED"));
 	}
 
@@ -170,7 +169,7 @@ class EmailVerificationHttpIntegrationTest {
 	@Test
 	void cleanupKeepsVerifiedProofForTenMinutesAndResendDoesNotRevokeIt() throws Exception {
 		String token=proof("member@gmail.com");
-		store.purgeExpired(Instant.now().plusSeconds(301));
+		store.purgeExpired(LocalDateTime.now(ZoneId.of("Asia/Seoul")).plusSeconds(301));
 		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM verification",Integer.class)).isEqualTo(1);
 		allowResend();when(mail.issueVerificationEmail(anyString())).thenReturn("654321");send("member@gmail.com");
 		verify("member@gmail.com","123456").andExpect(status().isBadRequest());
@@ -195,4 +194,38 @@ class EmailVerificationHttpIntegrationTest {
 		request("/password-reset",Map.of("email","member@gmail.com","password","new@123"))
 				.andExpect(status().isOk()).andExpect(jsonPath("$.message").value("비밀번호가 재설정되었습니다."));
 	}
+	@Test
+	void emailVerificationResponsesAndDatabaseUseTheSameKstLocalTime() throws Exception {
+		LocalDateTime requestedAt = LocalDateTime.now(ZoneId.of("Asia/Seoul"));
+		var sent = request("/send-verification/sign-up", Map.of("email", "time@gmail.com"))
+				.andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+		var delivery = json.readTree(sent);
+		String expiresAt = delivery.get("expiresAt").asText();
+		String resendAt = delivery.get("resendAvailableAt").asText();
+		assertThat(expiresAt).doesNotContain("Z", "+");
+		assertThat(resendAt).doesNotContain("Z", "+");
+		LocalDateTime sentAt = storedVerificationTime("sent_at", "time@gmail.com");
+		assertThat(sentAt).isBetween(requestedAt.minusSeconds(1), LocalDateTime.now(ZoneId.of("Asia/Seoul")));
+		assertThat(LocalDateTime.parse(expiresAt)).isEqualTo(sentAt.plusMinutes(5));
+		assertThat(LocalDateTime.parse(resendAt)).isEqualTo(sentAt.plusSeconds(60));
+		assertThat(storedVerificationTime("expires_at", "time@gmail.com")).isEqualTo(LocalDateTime.parse(expiresAt));
+		LocalDateTime lastSentAt = jdbc.queryForObject(
+				"SELECT last_sent_at FROM email_verification_rate_limits WHERE bucket_key LIKE 'email:%'",
+				(row, index) -> row.getObject("last_sent_at", LocalDateTime.class));
+		assertThat(lastSentAt).isEqualTo(sentAt);
+
+		var verified = verify("time@gmail.com", "123456").andExpect(status().isOk())
+				.andReturn().getResponse().getContentAsString();
+		String tokenExpiry = json.readTree(verified).get("expiresAt").asText();
+		assertThat(tokenExpiry).doesNotContain("Z", "+");
+		LocalDateTime verifiedAt = storedVerificationTime("verified_at", "time@gmail.com");
+		assertThat(LocalDateTime.parse(tokenExpiry)).isEqualTo(verifiedAt.plusMinutes(10));
+		assertThat(storedVerificationTime("expires_at", "time@gmail.com")).isEqualTo(LocalDateTime.parse(tokenExpiry));
+	}
+
+	private LocalDateTime storedVerificationTime(String column, String email) {
+		return jdbc.queryForObject("SELECT " + column + " FROM verification WHERE email=?",
+				(row, index) -> row.getObject(column, LocalDateTime.class), email);
+	}
+
 }

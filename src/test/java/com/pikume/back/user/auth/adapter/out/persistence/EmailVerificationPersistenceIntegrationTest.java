@@ -53,7 +53,7 @@ class EmailVerificationPersistenceIntegrationTest {
 		tx.required(() -> {
 			em.createQuery("delete from Verification").executeUpdate();
 			em.createQuery("delete from EmailVerificationRateLimit").executeUpdate();
-			em.persist(new EmailVerificationRateLimit("guard",Instant.EPOCH));return null;
+			em.persist(new EmailVerificationRateLimit("guard",LocalDateTime.of(1970, 1, 1, 0, 0)));return null;
 		});
 		when(policy.maxCodeAttempts()).thenReturn(5);
 		when(policy.resendSeconds()).thenReturn(60);
@@ -79,17 +79,17 @@ class EmailVerificationPersistenceIntegrationTest {
 		assertThatThrownBy(() -> service.sendEmailCode(new SendEmailVerificationCommand("a@gmail.com","origin")))
 				.isInstanceOf(EmailVerificationException.class).extracting("reason").isEqualTo(EmailVerificationFailure.EMAIL_SEND_FAILED);
 		assertThat(count("Verification")).isEqualTo(1);
-		assertThat((Instant) tx.required(() -> em.createQuery("select v from Verification v",Verification.class).getSingleResult().getDeliveryCompletedAt())).isNull();
+		assertThat((LocalDateTime) tx.required(() -> em.createQuery("select v from Verification v",Verification.class).getSingleResult().getDeliveryCompletedAt())).isNull();
 	}
 
 	@Test
 	void cleanupCannotRemoveARecentSendCooldownAtHourlyWindowBoundary() {
-		Instant now=Instant.now();
+		LocalDateTime now=LocalDateTime.now(ZoneId.of("Asia/Seoul"));
 		tx.required(() -> {
 			var bucket=new EmailVerificationRateLimit("email:"+EmailVerificationService.hash("a@gmail.com"),now.minusSeconds(3601));
 			bucket.increment(now);em.persist(bucket);return null;
 		});
-		store.purgeExpired(Instant.now());
+		store.purgeExpired(LocalDateTime.now(ZoneId.of("Asia/Seoul")));
 		assertThatThrownBy(() -> service.sendEmailCode(new SendEmailVerificationCommand("a@gmail.com","origin")))
 				.isInstanceOf(EmailVerificationException.class).extracting("reason").isEqualTo(EmailVerificationFailure.RATE_LIMITED);
 	}
@@ -100,7 +100,7 @@ class EmailVerificationPersistenceIntegrationTest {
 		tx.required(()->{
 			Verification verification=store.lockLatestVerification("a@gmail.com").orElseThrow();
 			assertThat(verification.getCode()).isNotEqualTo("123456");
-			assertThat(verification.validateCode("123456",Instant.now(),2)).isNull();
+			assertThat(verification.validateCode("123456",LocalDateTime.now(ZoneId.of("Asia/Seoul")),2)).isNull();
 			assertThat(result.expiresAt()).isEqualTo(verification.getSentAt().plusSeconds(300));
 			assertThat(result.resendAvailableAt()).isEqualTo(verification.getSentAt().plusSeconds(60));
 			return null;
@@ -122,11 +122,11 @@ class EmailVerificationPersistenceIntegrationTest {
 	@Test
 	void cleanupPreservesLegacyVerificationWhileRemovingExpiredVerifications() {
 		tx.required(()->{
-			store.saveVerification(Verification.emailVerification("expired","a@gmail.com",Instant.now().minusSeconds(301),60));
+			store.saveVerification(Verification.emailVerification("expired","a@gmail.com",LocalDateTime.now(ZoneId.of("Asia/Seoul")).minusSeconds(301),60));
 			em.persist(new Verification("legacy@gmail.com","123456",VerificationType.SIGN_UP,LocalDateTime.now().minusMinutes(1)));
 			return null;
 		});
-		store.purgeExpired(Instant.now());
+		store.purgeExpired(LocalDateTime.now(ZoneId.of("Asia/Seoul")));
 		assertThat(count("Verification")).isEqualTo(1);
 		assertThat(verifications.findByEmailAndType("legacy@gmail.com",VerificationType.SIGN_UP)).isPresent();
 	}

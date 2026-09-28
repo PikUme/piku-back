@@ -13,15 +13,16 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.Locale;
 import java.util.Optional;
 
 @Repository
 public class EmailVerificationPersistenceAdapter implements EmailVerificationStorePort {
+
+	private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
 	@PersistenceContext
 	private EntityManager em;
@@ -67,13 +68,13 @@ public class EmailVerificationPersistenceAdapter implements EmailVerificationSto
 	}
 
 	@Override
-	public Instant reserveEmailSend(String emailHash, String originHash, int emailLimit, int originLimit, int resendSeconds) {
+	public LocalDateTime reserveEmailSend(String emailHash, String originHash, int emailLimit, int originLimit, int resendSeconds) {
 		// 여러 서버에 첫 요청이 동시에 들어와도 발송 횟수를 차례로 확인하도록 공통 행을 잠근다.
 		if (em.find(EmailVerificationRateLimit.class, "guard", LockModeType.PESSIMISTIC_WRITE) == null) {
 			throw new IllegalStateException("Email verification rate limit guard is missing");
 		}
 		// 저장 후 읽어 온 발송 시각과 일치하도록 DB와 같은 마이크로초 정밀도를 사용한다.
-		Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+		LocalDateTime now = LocalDateTime.now(KST).truncatedTo(ChronoUnit.MICROS);
 		EmailVerificationRateLimit email = bucket("email:" + emailHash, now);
 		EmailVerificationRateLimit origin = bucket("ip:" + originHash, now);
 		if (email.getSendCount() >= emailLimit || origin.getSendCount() >= originLimit) {
@@ -87,7 +88,7 @@ public class EmailVerificationPersistenceAdapter implements EmailVerificationSto
 		return now;
 	}
 
-	private EmailVerificationRateLimit bucket(String key, Instant now) {
+	private EmailVerificationRateLimit bucket(String key, LocalDateTime now) {
 		EmailVerificationRateLimit bucket = em.find(EmailVerificationRateLimit.class, key);
 		if (bucket == null) {
 			bucket = new EmailVerificationRateLimit(key, now);
@@ -99,12 +100,12 @@ public class EmailVerificationPersistenceAdapter implements EmailVerificationSto
 
 	@Override
 	@Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
-	public void purgeExpired(Instant now) {
+	public void purgeExpired(LocalDateTime now) {
 		// 발송과 같은 순서로 제한 잠금 행을 먼저 잠근 뒤 인증 행을 정리한다.
 		em.find(EmailVerificationRateLimit.class, "guard", LockModeType.PESSIMISTIC_WRITE);
 		// 새 인증 요청의 삽입을 막는 범위 잠금을 줄이기 위해 READ_COMMITTED에서 정리한다.
 		em.createQuery("delete from Verification v where v.emailVerificationId is not null and v.expiresAt<=:now")
-				.setParameter("now", LocalDateTime.ofInstant(now, ZoneOffset.UTC))
+				.setParameter("now", now)
 				.executeUpdate();
 		// 발송 중 갱신되는 제한 기록을 삭제하지 않도록 발송과 같은 잠금을 유지한다.
 		if (em.find(EmailVerificationRateLimit.class, "guard", LockModeType.PESSIMISTIC_WRITE) != null) {

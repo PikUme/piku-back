@@ -30,9 +30,8 @@ import com.pikume.back.user.domain.exception.InvalidNicknameException;
 import com.pikume.back.user.domain.service.PasswordPolicy;
 
 import java.lang.reflect.Field;
-import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -207,7 +206,7 @@ class AuthServiceTest {
 			given(recordUserAccountPort.recordUserAccount(any(User.class))).willAnswer(invocation -> {
 				Field expiresAt = Verification.class.getDeclaredField("expiresAt");
 				expiresAt.setAccessible(true);
-				expiresAt.set(verified, LocalDateTime.now(ZoneOffset.UTC).minusSeconds(1));
+				expiresAt.set(verified, LocalDateTime.now(ZoneId.of("Asia/Seoul")).minusSeconds(1));
 				return null;
 			});
 			assertThatThrownBy(() -> authService.signUp(new SignUpCommand("test@piku.store", "abc@123", "테스트", 1L, "test-token")))
@@ -387,7 +386,7 @@ class AuthServiceTest {
 	}
 
 	private Verification verifiedEmail(String email) {
-		var now = Instant.now();
+		var now = LocalDateTime.now(ZoneId.of("Asia/Seoul"));
 		var verification = Verification.emailVerification("test-id", email, now, 60);
 		verification.activateCode("123456", now);
 		verification.verify(EmailVerificationService.hash("test-token"), now);

@@ -32,7 +32,8 @@ import java.util.List;
 import com.pikume.back.user.auth.application.port.in.EmailVerificationUseCase;
 import com.pikume.back.user.auth.application.dto.SendEmailVerificationCommand;
 import com.pikume.back.user.auth.application.dto.EmailVerificationDelivery;
-import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -91,7 +92,7 @@ class AuthControllerTest {
 	@Test
 	@DisplayName("POST /api/auth/send-verification/sign-up은 기존 성공 메시지를 반환한다")
 	void sendSignUpVerificationEmailReturnsMessageResponse() throws Exception {
-		given(emailVerificationUseCase.sendEmailCode(any())).willReturn(new EmailVerificationDelivery(Instant.now().plusSeconds(300), Instant.now().plusSeconds(60)));
+		given(emailVerificationUseCase.sendEmailCode(any())).willReturn(new EmailVerificationDelivery(LocalDateTime.now(ZoneId.of("Asia/Seoul")).plusSeconds(300), LocalDateTime.now(ZoneId.of("Asia/Seoul")).plusSeconds(60)));
 		mockMvc.perform(post("/api/auth/send-verification/sign-up")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"email\":\"user@example.com\"}"))
@@ -104,7 +105,7 @@ class AuthControllerTest {
 	@Test
 	@DisplayName("POST /api/auth/send-verification/sign-up은 비어 있지 않은 이메일을 Use Case에 위임한다")
 	void sendSignUpVerificationDelegatesNonBlankEmail() throws Exception {
-		given(emailVerificationUseCase.sendEmailCode(any())).willReturn(new EmailVerificationDelivery(Instant.now().plusSeconds(300), Instant.now().plusSeconds(60)));
+		given(emailVerificationUseCase.sendEmailCode(any())).willReturn(new EmailVerificationDelivery(LocalDateTime.now(ZoneId.of("Asia/Seoul")).plusSeconds(300), LocalDateTime.now(ZoneId.of("Asia/Seoul")).plusSeconds(60)));
 		mockMvc.perform(post("/api/auth/send-verification/sign-up")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"email\":\"not-an-email\"}"))
