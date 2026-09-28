@@ -4,7 +4,15 @@ import com.pikume.back.global.error.ProblemDetailFactory;
 import com.pikume.back.global.exception.GlobalExceptionHandler;
 import com.pikume.back.global.port.out.ResolveObjectUrlPort;
 import com.pikume.back.security.principal.UserPrincipal;
-import com.pikume.back.user.adapter.out.memory.InMemoryNicknameHoldAdapter;
+import com.pikume.back.user.adapter.out.persistence.NicknameHoldPersistenceAdapter;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.DefaultTransactionDefinition;
+import org.junit.jupiter.api.AfterEach;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import com.pikume.back.user.application.port.in.QueryUserProfileUseCase;
 import com.pikume.back.user.application.port.out.CheckUserUniquenessPort;
 import com.pikume.back.user.application.port.out.LoadUserForPasswordResetPort;
@@ -28,7 +36,6 @@ import com.pikume.back.user.auth.domain.service.EmailVerificationPolicy;
 import com.pikume.back.user.auth.domain.vo.VerificationType;
 import com.pikume.back.user.domain.User;
 import com.pikume.back.user.domain.exception.NicknameAlreadyExistsException;
-import com.pikume.back.user.domain.service.NicknamePolicy;
 import com.pikume.back.user.domain.service.PasswordPolicy;
 import com.pikume.back.user.domain.vo.Nickname;
 import jakarta.validation.constraints.NotNull;
@@ -39,6 +46,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -79,7 +87,10 @@ class NicknameWebContractTest {
 
 	private MockMvc mockMvc;
 	private TestUserAccountStore userAccountStore;
-	private InMemoryNicknameHoldAdapter nicknameHoldAdapter;
+	private NicknameHoldPersistenceAdapter nicknameHoldAdapter;
+	private DataSourceTransactionManager transactionManager;
+	private TransactionStatus transaction;
+	private JdbcTemplate jdbc;
 	private LoadCompletedEmailVerificationPort loadCompletedEmailVerificationPort;
 	private EmailVerificationStorePort emailVerificationStorePort;
 	private CheckSignUpCharacterSelectionPort checkSignUpCharacterSelectionPort;
@@ -90,7 +101,14 @@ class NicknameWebContractTest {
 	@BeforeEach
 	void setUp() {
 		userAccountStore = new TestUserAccountStore();
-		nicknameHoldAdapter = new InMemoryNicknameHoldAdapter(new NicknamePolicy());
+		var source = new DriverManagerDataSource("jdbc:h2:mem:" + java.util.UUID.randomUUID() + ";DB_CLOSE_DELAY=-1", "sa", "");
+		jdbc = new JdbcTemplate(source);
+		jdbc.execute("CREATE TABLE nickname_write_mutex (id INT PRIMARY KEY)");
+		jdbc.update("INSERT INTO nickname_write_mutex VALUES (1)");
+		jdbc.execute("CREATE TABLE nickname_holds (nickname VARCHAR(255) PRIMARY KEY, owner_key VARCHAR(64) NOT NULL UNIQUE, expires_at TIMESTAMP(6) NOT NULL)");
+		transactionManager = new DataSourceTransactionManager(source);
+		transaction = transactionManager.getTransaction(new DefaultTransactionDefinition());
+		nicknameHoldAdapter = new NicknameHoldPersistenceAdapter(jdbc);
 		loadCompletedEmailVerificationPort = mock(LoadCompletedEmailVerificationPort.class);
 		emailVerificationStorePort = mock(EmailVerificationStorePort.class);
 		checkSignUpCharacterSelectionPort = mock(CheckSignUpCharacterSelectionPort.class);
@@ -112,7 +130,7 @@ class NicknameWebContractTest {
 				checkSignUpCharacterSelectionPort,
 				emailVerificationStorePort,
 				new EmailVerificationPolicy(),
-				new PasswordPolicy());
+				new PasswordPolicy(), nicknameHoldAdapter);
 		UserProfileCommandService profileService = new UserProfileCommandService(
 				userAccountStore,
 				userAccountStore,
@@ -144,25 +162,31 @@ class NicknameWebContractTest {
 				.build();
 	}
 
+	@AfterEach void closeDatabase() {
+		transactionManager.rollback(transaction);
+		jdbc.execute("SET DB_CLOSE_DELAY 0");
+	}
+
 	@Nested
 	@DisplayName("POST /api/auth/signup")
 	class Signup {
 
-		@Test
-		@DisplayName("원문은 20자를 초과해도 정규화한 20자 닉네임으로 가입한다")
-		void acceptsRawNicknameLongerThanTwentyWhenNormalizedLengthIsTwenty() throws Exception {
+		@ParameterizedTest
+		@ValueSource(strings = {"12345678901234567890", "가입대기_user"})
+		@DisplayName("닉네임을 정규화하고 일반 길이 규칙에 맞으면 가입한다")
+		void acceptsValidNormalizedNicknames(String nickname) throws Exception {
 			prepareSignup("user@example.com");
 
 			mockMvc.perform(post("/api/auth/signup")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
-								{"email":"user@example.com","password":"abc@123","nickname":" 12345678901234567890 ","fixedCharacterId":1,"emailVerificationToken":"test-token"}
-								"""))
+								{"email":"user@example.com","password":"abc@123","nickname":" %s ","fixedCharacterId":1,"emailVerificationToken":"test-token"}
+								""".formatted(nickname)))
 					.andExpect(status().isCreated())
 					.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
 					.andExpect(jsonPath("$.message").value("회원가입 성공"));
 
-			assertThat(userAccountStore.lastSignedUpUser().getNickname()).isEqualTo("12345678901234567890");
+			assertThat(userAccountStore.lastSignedUpUser().getNickname()).isEqualTo(nickname);
 		}
 
 		@ParameterizedTest(name = "{0}")
@@ -319,11 +343,12 @@ class NicknameWebContractTest {
 			assertThat(userAccountStore.profileUser().getCharacterId()).isEqualTo(2L);
 		}
 
-		@Test
+		@ParameterizedTest
+		@ValueSource(strings = {"새닉", "가입대기_user"})
 		@DisplayName("공백 형태가 다른 예약과 변경을 같은 닉네임으로 처리한다")
-		void usesNormalizedNicknameAcrossReservationAndUpdate() throws Exception {
+		void usesNormalizedNicknameAcrossReservationAndUpdate(String nickname) throws Exception {
 			mockMvc.perform(get("/api/users/nickname/availability")
-						.param("nickname", "  새닉　 "))
+						.param("nickname", "  " + nickname + "　 "))
 					.andExpect(status().isOk())
 					.andExpect(jsonPath("$.success").value(true))
 					.andExpect(jsonPath("$.message").value("사용 가능한 닉네임입니다."));
@@ -331,15 +356,15 @@ class NicknameWebContractTest {
 			mockMvc.perform(patch("/api/users/profile")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
-								{"newNickname":"\\t새닉\\n","characterId":null}
-								"""))
+								{"newNickname":"\\t%s\\n","characterId":null}
+								""".formatted(nickname)))
 					.andExpect(status().isOk())
 					.andExpect(jsonPath("$.success").value(true))
 					.andExpect(jsonPath("$.message").value("닉네임이 성공적으로 변경되었습니다."))
-					.andExpect(jsonPath("$.newNickname").value("새닉"))
+					.andExpect(jsonPath("$.newNickname").value(nickname))
 					.andExpect(jsonPath("$.avatar").doesNotExist());
 
-			assertThat(userAccountStore.profileUser().getNickname()).isEqualTo("새닉");
+			assertThat(userAccountStore.profileUser().getNickname()).isEqualTo(nickname);
 		}
 
 		@Test
@@ -440,6 +465,9 @@ class NicknameWebContractTest {
 		public Optional<User> loadProfileUser(String userId) {
 			return USER_ID.equals(userId) ? Optional.of(profileUser) : Optional.empty();
 		}
+
+		@Override
+		public Optional<User> loadProfileUserForUpdate(String userId) { return loadProfileUser(userId); }
 
 		@Override
 		public User recordUserAccount(User user) {

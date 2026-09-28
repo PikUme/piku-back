@@ -28,6 +28,11 @@ public class UserAccountPersistenceAdapter implements LoadUserForProfilePort, Lo
 	}
 
 	@Override
+	public Optional<User> loadProfileUserForUpdate(String userId) {
+		return jpaRepository.findByIdForUpdate(userId);
+	}
+
+	@Override
 	public Optional<User> loadForLogin(String email) {
 		return jpaRepository.findByEmail(new Email(email));
 	}
@@ -39,7 +44,7 @@ public class UserAccountPersistenceAdapter implements LoadUserForProfilePort, Lo
 
 	@Override
 	public Optional<User> loadPasswordResetUser(String email) {
-		return jpaRepository.findByEmail(new Email(email));
+		return jpaRepository.findByEmailForUpdate(new Email(email));
 	}
 
 	@Override

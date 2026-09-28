@@ -40,11 +40,16 @@ class EmailVerificationHttpIntegrationTest {
     @Autowired JdbcTemplate jdbc;
     @Autowired EmailVerificationTransactionPort transactions;
     @Autowired EmailVerificationStorePort store;
+    @Autowired com.pikume.back.user.application.service.UserProfileCommandService profiles;
     @MockitoBean IssueVerificationEmailPort mail;
     long characterId;
 
     @BeforeEach void setup() {
         characterId=transactions.required(()->{
+            jdbc.execute("CREATE TABLE IF NOT EXISTS nickname_write_mutex (id INT PRIMARY KEY)");
+            jdbc.execute("CREATE TABLE IF NOT EXISTS nickname_holds (nickname VARCHAR(255) PRIMARY KEY, owner_key VARCHAR(64) NOT NULL UNIQUE, expires_at TIMESTAMP(6) NOT NULL)");
+            if (jdbc.queryForObject("SELECT COUNT(*) FROM nickname_write_mutex",Integer.class)==0) jdbc.update("INSERT INTO nickname_write_mutex VALUES (1)");
+            jdbc.update("DELETE FROM nickname_holds");
             em.createQuery("delete from Verification").executeUpdate();
             em.createQuery("delete from VerifiedEmail").executeUpdate();
             em.createQuery("delete from EmailVerificationRateLimit").executeUpdate();
@@ -158,4 +163,72 @@ class EmailVerificationHttpIntegrationTest {
         request("/password-reset",Map.of("email","member@gmail.com","password","new@123"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.message").value("비밀번호가 재설정되었습니다."));
     }
+    @Test void verifiedGuestCanReserveNicknameAndUseItInExistingSignup() throws Exception {
+        String token=proof("member@gmail.com");
+        request("/signup/nickname-reservations",Map.of("emailVerificationToken",token,"nickname"," 새닉 "))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.nickname").value("새닉"))
+                .andExpect(jsonPath("$.expiresAt").isNotEmpty());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM users",Integer.class)).isZero();
+        signup("member@gmail.com",token,"새닉",characterId).andExpect(status().isCreated());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM nickname_holds",Integer.class)).isZero();
+    }
+
+    ResultActions reserve(String token,String nickname) throws Exception {
+        return request("/signup/nickname-reservations",Map.of("emailVerificationToken",token,"nickname",nickname));
+    }
+    @Test void guestHoldBlocksOtherSignupsAndFailedSignupPreservesTheOwnersRetry() throws Exception {
+        String owner=proof("owner@gmail.com"), other=proof("other@gmail.com");
+        reserve(owner,"예약닉").andExpect(status().isOk());
+        reserve(other,"예약닉").andExpect(status().isConflict());
+        signup("other@gmail.com",other,"예약닉",characterId).andExpect(status().isConflict());
+        signup("owner@gmail.com",owner,"예약닉",999999).andExpect(status().isNotFound());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM nickname_holds",Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT consumed_at FROM verification WHERE email=?",java.sql.Timestamp.class,"owner@gmail.com")).isNull();
+        signup("owner@gmail.com",owner,"예약닉",characterId).andExpect(status().isCreated());
+        signup("other@gmail.com",other,"다른닉",characterId).andExpect(status().isCreated());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM nickname_holds",Integer.class)).isZero();
+    }
+    @Test void reservationLastsThreeMinutesWithoutRenewalAndFailedReplacementKeepsIt() throws Exception {
+        String owner=proof("owner@gmail.com"), other=proof("other@gmail.com");
+        Instant before=Instant.now();
+        var first=reserve(owner,"처음닉").andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        Instant expiry=Instant.parse(json.readTree(first).get("expiresAt").asText());
+        assertThat(expiry).isBetween(before.plusSeconds(179),Instant.now().plusSeconds(181));
+        var again=reserve(owner," 처음닉 ").andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat(json.readTree(again).get("expiresAt")).isEqualTo(json.readTree(first).get("expiresAt"));
+        reserve(other,"선점닉").andExpect(status().isOk());
+        reserve(owner,"선점닉").andExpect(status().isConflict());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM nickname_holds WHERE nickname='처음닉'",Integer.class)).isEqualTo(1);
+        reserve(owner,"새로운닉").andExpect(status().isOk());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM nickname_holds WHERE nickname='처음닉'",Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM nickname_holds",Integer.class)).isEqualTo(2);
+    }
+    @Test void expiredHoldCanBeTakenBySignupWithoutReservation() throws Exception {
+        String owner=proof("owner@gmail.com"), other=proof("other@gmail.com");
+        reserve(owner,"예약닉").andExpect(status().isOk());
+        jdbc.update("UPDATE nickname_holds SET expires_at=?",java.time.LocalDateTime.now(java.time.ZoneOffset.UTC).minusSeconds(1));
+        signup("other@gmail.com",other,"예약닉",characterId).andExpect(status().isCreated());
+    }
+    @Test void reservationRequiresUnexpiredUnusedEmailProof() throws Exception {
+        reserve("forged","새닉").andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("TOKEN_INVALID"));
+        String expired=proof("expired@gmail.com");
+        jdbc.update("UPDATE verification SET expires_at=? WHERE email=?",java.time.LocalDateTime.now(java.time.ZoneOffset.UTC).minusSeconds(1),"expired@gmail.com");
+        reserve(expired,"새닉").andExpect(status().isGone()).andExpect(jsonPath("$.code").value("TOKEN_EXPIRED"));
+        String used=proof("used@gmail.com");signup("used@gmail.com",used,"가입닉",characterId).andExpect(status().isCreated());
+        reserve(used,"새닉").andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("TOKEN_ALREADY_USED"));
+    }
+    @Test void memberProfileAndGuestSignupRespectEachOthersReservations() throws Exception {
+        String member=proof("member@gmail.com");signup("member@gmail.com",member,"기존닉",characterId).andExpect(status().isCreated());
+        String memberId=jdbc.queryForObject("SELECT id FROM users WHERE email=?",String.class,"member@gmail.com");
+        String guest=proof("guest@gmail.com");
+        assertThat(profiles.reserveIfAvailable("회원예약",memberId)).isTrue();
+        reserve(guest,"회원예약").andExpect(status().isConflict());
+        signup("guest@gmail.com",guest,"회원예약",characterId).andExpect(status().isConflict());
+        reserve(guest,"비회원예약").andExpect(status().isOk());
+        assertThat(profiles.reserveIfAvailable("비회원예약",memberId)).isFalse();
+        assertThat(profiles.updateProfile(new com.pikume.back.user.application.dto.UpdateProfileCommand(memberId,"비회원예약",null)).success()).isFalse();
+        assertThat(profiles.updateProfile(new com.pikume.back.user.application.dto.UpdateProfileCommand(memberId,"회원예약",null)).success()).isTrue();
+        signup("guest@gmail.com",guest,"비회원예약",characterId).andExpect(status().isCreated());
+    }
+
 }

@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import com.pikume.back.user.auth.adapter.in.web.dto.request.NicknameReservationRequest;
 import jakarta.servlet.http.HttpServletRequest;
 import com.pikume.back.user.auth.application.port.in.EmailVerificationUseCase;
 import com.pikume.back.user.auth.application.dto.SendEmailVerificationCommand;
@@ -52,6 +53,13 @@ public class AuthController {
 		signUpUseCase.signUp(new SignUpCommand(
 				dto.getEmail(), dto.getPassword(), dto.getNickname(), dto.getFixedCharacterId(), dto.getEmailVerificationToken()));
 		return ResponseEntity.status(HttpStatus.CREATED).body(new MessageResponse("회원가입 성공"));
+	}
+
+	@Operation(summary = "회원가입 닉네임 예약", description = "이메일 인증 후 닉네임을 3분 동안 예약합니다.")
+	@PostMapping("/signup/nickname-reservations")
+	public ResponseEntity<?> reserveNickname(@Valid @RequestBody NicknameReservationRequest request) {
+		return ResponseEntity.ok().header("Cache-Control", "no-store")
+				.body(signUpUseCase.reserveNickname(request.nickname(), request.emailVerificationToken()));
 	}
 
 	@Operation(summary = "회원가입 이메일 발송", description = "회원가입시 사용자 본인인증과 이메일 중복확인을 위해 인증코드를 이메일로 발송합니다.")

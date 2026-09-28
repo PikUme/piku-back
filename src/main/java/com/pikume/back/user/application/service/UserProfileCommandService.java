@@ -19,12 +19,10 @@ import com.pikume.back.user.application.port.out.NicknameHoldPort;
 import com.pikume.back.user.application.port.out.RecordUserAccountPort;
 import com.pikume.back.user.domain.User;
 import com.pikume.back.user.domain.vo.Nickname;
-
 import java.time.Instant;
 
 /**
- * 프로필 수정 Application Service
- * UpdateUserProfileUseCase와 ReserveNicknameUseCase를 구현합니다.
+ * 닉네임 예약과 기존 프로필 수정의 원자적 변경을 조정합니다.
  */
 @Service
 @RequiredArgsConstructor
@@ -38,16 +36,18 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 	private final NicknameHoldPort nicknameHoldPort;
 
 	@Override
+	@Transactional
 	public boolean reserveIfAvailable(String nickname, String userId) {
 		Nickname requestedNickname = new Nickname(nickname);
-		User user = loadUserForProfilePort.loadProfileUser(userId)
+		nicknameHoldPort.lockNicknameWrites();
+		User user = loadUserForProfilePort.loadProfileUserForUpdate(userId)
 				.orElseThrow(UserNotFoundException::new);
-		if (requestedNickname.value().equals(user.getNickname()))
+		if (user.isWithdrawn()) return false;
+		if (requestedNickname.value().equals(user.getNickname())) {
+			nicknameHoldPort.releaseForOwner(userId);
 			return true;
-
-		if (checkUserUniquenessPort.isNicknameInUse(requestedNickname))
-			return false;
-
+		}
+		if (checkUserUniquenessPort.isNicknameInUse(requestedNickname)) return false;
 		return nicknameHoldPort.tryAcquire(requestedNickname, userId, Instant.now());
 	}
 
@@ -59,8 +59,13 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 		}
 		Nickname requestedNickname = command.newNickname() == null ? null : new Nickname(command.newNickname());
 
-		User user = loadUserForProfilePort.loadProfileUser(command.userId())
+		nicknameHoldPort.lockNicknameWrites();
+		User user = loadUserForProfilePort.loadProfileUserForUpdate(command.userId())
 				.orElseThrow(UserNotFoundException::new);
+		if (user.isWithdrawn()) {
+			return UpdateProfileResult.failure(UpdateProfileFailureReason.PROFILE_CONFLICT,
+				"현재 상태에서는 프로필을 수정할 수 없습니다.", user.getNickname());
+		}
 		String oldNickname = user.getNickname();
 		Long oldCharacterId = user.getCharacterId();
 
@@ -107,9 +112,14 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 	@Override
 	@Transactional
 	public void updateProfileImage(String userId, Long imageId) {
-		User user = loadUserForProfilePort.loadProfileUser(userId)
+		nicknameHoldPort.lockNicknameWrites();
+		User user = loadUserForProfilePort.loadProfileUserForUpdate(userId)
 				.orElseThrow(UserNotFoundException::new);
 
+		if (user.isWithdrawn()) {
+			throw new UpdateProfileFailureException(UpdateProfileFailureReason.PROFILE_CONFLICT,
+				"현재 상태에서는 프로필을 수정할 수 없습니다.");
+		}
 		fixedCharacterAvatarPort.resolveFixedCharacterObjectKey(imageId)
 				.orElseThrow(() -> {
 					log.warn("event=profile_image_update outcome=denied reason=character_not_found characterId={}", imageId);
