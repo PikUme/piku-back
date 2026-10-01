@@ -5,7 +5,6 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import jakarta.servlet.http.HttpServletRequest;
 import com.pikume.back.user.auth.application.port.in.EmailVerificationUseCase;
 import com.pikume.back.user.auth.application.dto.SendEmailVerificationCommand;
 import com.pikume.back.user.auth.application.dto.VerifyEmailCodeCommand;
@@ -61,9 +60,8 @@ public class AuthController {
 	})
 	@PostMapping("/send-verification/sign-up")
 	public ResponseEntity<?> sendSignUpVerificationEmail(
-			@Valid @RequestBody VerificationEmailRequest request,
-			HttpServletRequest httpRequest) {
-		var result = emailVerificationUseCase.sendEmailCode(new SendEmailVerificationCommand(request.email(), httpRequest.getRemoteAddr()));
+			@Valid @RequestBody VerificationEmailRequest request) {
+		var result = emailVerificationUseCase.sendEmailCode(new SendEmailVerificationCommand(request.email()));
 		return ResponseEntity.ok().header("Cache-Control", "no-store").body(Map.of(
 				"message", "회원가입 인증 이메일이 발송되었습니다.", "expiresAt", result.expiresAt(),
 				"resendAvailableAt", result.resendAvailableAt()));

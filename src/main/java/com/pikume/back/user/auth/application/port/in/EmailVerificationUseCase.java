@@ -5,5 +5,4 @@ import com.pikume.back.user.auth.application.dto.*;
 public interface EmailVerificationUseCase {
     EmailVerificationDelivery sendEmailCode(SendEmailVerificationCommand command);
     EmailVerificationResult verifyEmailCode(VerifyEmailCodeCommand command);
-    void purgeExpiredVerifications();
 }

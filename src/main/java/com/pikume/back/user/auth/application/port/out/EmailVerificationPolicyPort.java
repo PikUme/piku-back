@@ -4,5 +4,4 @@ public interface EmailVerificationPolicyPort {
     int maxCodeAttempts();
     int resendSeconds();
     int emailHourlyLimit();
-    int originHourlyLimit();
 }

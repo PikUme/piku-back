@@ -56,6 +56,8 @@ import java.time.ZoneId;
 import java.util.HashSet;
 import java.util.Optional;
 import com.pikume.back.user.auth.application.port.out.EmailVerificationStorePort;
+import com.pikume.back.user.auth.application.port.out.SignUpTransactionPort;
+import com.pikume.back.user.auth.application.port.out.EmailVerificationOperationsAlertPort;
 import com.pikume.back.user.auth.application.port.in.EmailVerificationUseCase;
 import com.pikume.back.user.auth.domain.Verification;
 import com.pikume.back.user.auth.application.service.EmailVerificationService;
@@ -113,6 +115,8 @@ class NicknameWebContractTest {
 				passwordProtectionPort,
 				checkSignUpCharacterSelectionPort,
 				emailVerificationStorePort,
+				(EmailVerificationOperationsAlertPort) error -> {},
+				(SignUpTransactionPort) userAccountStore::recordUserAccount,
 				new EmailVerificationPolicy(),
 				new PasswordPolicy());
 		UserProfileCommandService profileService = new UserProfileCommandService(
@@ -394,11 +398,10 @@ class NicknameWebContractTest {
 	}
 
 	private void prepareSignup(String email) {
-		var now = LocalDateTime.now(ZoneId.of("Asia/Seoul"));
-		var verification = Verification.emailVerification("test-id", email, now, 60);
-		verification.activateCode("123456", now);
-		verification.verify(EmailVerificationService.hash("test-token"), now);
-		given(emailVerificationStorePort.lockByTokenHash(EmailVerificationService.hash("test-token"))).willReturn(Optional.of(verification));
+		given(emailVerificationStorePort.isTokenValid(
+				EmailVerificationService.hash(email), EmailVerificationService.hash("test-token"))).willReturn(true);
+		given(emailVerificationStorePort.removeToken(
+				EmailVerificationService.hash(email), EmailVerificationService.hash("test-token"))).willReturn(true);
 		given(checkSignUpCharacterSelectionPort.isSelectableFixedCharacter(1L)).willReturn(true);
 		given(passwordProtectionPort.protect("abc@123")).willReturn("encoded-password");
 	}

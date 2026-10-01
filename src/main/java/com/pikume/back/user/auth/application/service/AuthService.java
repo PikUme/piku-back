@@ -7,6 +7,7 @@ import com.pikume.back.user.auth.application.dto.ResetPasswordCommand;
 import com.pikume.back.user.auth.application.dto.SignUpCommand;
 import com.pikume.back.user.auth.application.dto.VerifyEmailCommand;
 import com.pikume.back.user.auth.application.port.out.EmailVerificationStorePort;
+import com.pikume.back.user.auth.application.port.out.EmailVerificationOperationsAlertPort;
 import com.pikume.back.user.auth.application.exception.EmailVerificationException;
 import com.pikume.back.user.auth.application.exception.EmailVerificationFailure;
 import com.pikume.back.user.auth.application.port.in.ResetPasswordUseCase;
@@ -21,6 +22,7 @@ import com.pikume.back.user.auth.application.port.out.RecordCompletedEmailVerifi
 import com.pikume.back.user.auth.application.port.out.IssueVerificationEmailPort;
 import com.pikume.back.user.auth.domain.Verification;
 import com.pikume.back.user.auth.domain.VerifiedEmail;
+import com.pikume.back.user.auth.application.port.out.SignUpTransactionPort;
 import com.pikume.back.user.auth.domain.service.EmailVerificationPolicy;
 import com.pikume.back.user.auth.domain.vo.VerificationType;
 import com.pikume.back.user.auth.application.exception.AuthErrorCode;
@@ -41,6 +43,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
+import java.util.Locale;
 
 @Service
 @Slf4j
@@ -60,19 +63,21 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 	private final PasswordProtectionPort passwordProtectionPort;
 	private final CheckSignUpCharacterSelectionPort checkSignUpCharacterSelectionPort;
 	private final EmailVerificationStorePort emailVerificationStorePort;
+	private final EmailVerificationOperationsAlertPort verificationAlerts;
+	private final SignUpTransactionPort signUpTransactionPort;
 	private final EmailVerificationPolicy emailVerificationPolicy;
 	private final PasswordPolicy passwordPolicy;
 
 	@Override
-	@Transactional
 	public void signUp(SignUpCommand command) {
 		Nickname nickname = new Nickname(command.nickname());
 		requireValidEmail(command.email());
 		requireValidPassword(command.password());
-		Verification verified = requireVerifiedEmail(command.email(), command.emailVerificationToken());
 		if (checkUserUniquenessPort.isEmailRegistered(command.email())) {
 			throw new AuthException(AuthErrorCode.EMAIL_ALREADY_EXISTS);
 		}
+		String normalizedEmail = command.email().toLowerCase(Locale.ROOT);
+		String tokenHash = requireVerifiedEmail(normalizedEmail, command.emailVerificationToken());
 
 		requireSelectableFixedCharacter(command.fixedCharacterId());
 		User user = new User(
@@ -82,18 +87,24 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 				command.fixedCharacterId());
 
 		try {
-			recordUserAccountPort.recordUserAccount(user);
+			user = signUpTransactionPort.register(user);
 		} catch (EmailAlreadyExistsException exception) {
 			throw new AuthException(AuthErrorCode.EMAIL_ALREADY_EXISTS);
 		} catch (NicknameAlreadyExistsException exception) {
 			throw new AuthException(AuthErrorCode.NICKNAME_ALREADY_EXISTS);
 		}
-		LocalDateTime consumedAt = LocalDateTime.now(KST).truncatedTo(ChronoUnit.MICROS);
-		String consumptionFailure = verified.validateToken(consumedAt);
-		if (consumptionFailure != null) {
-			throw new EmailVerificationException(EmailVerificationFailure.valueOf(consumptionFailure));
+		try {
+			emailVerificationStorePort.removeToken(
+					EmailVerificationService.hash(normalizedEmail), tokenHash);
+		} catch (RuntimeException exception) {
+			String errorType = exception.getClass().getSimpleName();
+			log.error("event=signup_verification_cleanup outcome=failed userId={} errorType={}", user.getId(), errorType);
+			try {
+				verificationAlerts.signupTokenCleanupFailed(errorType);
+			} catch (RuntimeException alertException) {
+				log.error("event=signup_verification_alert outcome=failed errorType={}", alertException.getClass().getSimpleName());
+			}
 		}
-		verified.consumeVerifiedEmail(consumedAt);
 		log.info("event=user_signup outcome=success userId={}", user.getId());
 	}
 
@@ -149,20 +160,15 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 		log.info("event=password_reset outcome=success userId={}", user.getId());
 	}
 
-	private Verification requireVerifiedEmail(String email, String token) {
+	private String requireVerifiedEmail(String email, String token) {
 		if (token == null || token.isBlank()) {
 			throw new EmailVerificationException(EmailVerificationFailure.TOKEN_INVALID);
 		}
-		Verification verified = emailVerificationStorePort.lockByTokenHash(EmailVerificationService.hash(token))
-				.orElseThrow(() -> new EmailVerificationException(EmailVerificationFailure.TOKEN_INVALID));
-		if (!verified.getEmail().equalsIgnoreCase(email)) {
+		String tokenHash = EmailVerificationService.hash(token);
+		if (!emailVerificationStorePort.isTokenValid(EmailVerificationService.hash(email), tokenHash)) {
 			throw new EmailVerificationException(EmailVerificationFailure.TOKEN_INVALID);
 		}
-		String failure = verified.validateToken(LocalDateTime.now(KST).truncatedTo(ChronoUnit.MICROS));
-		if (failure != null) {
-			throw new EmailVerificationException(EmailVerificationFailure.valueOf(failure));
-		}
-		return verified;
+		return tokenHash;
 	}
 
 	private void saveVerificationCode(String email, String code, VerificationType type) {

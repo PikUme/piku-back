@@ -16,13 +16,10 @@ public class EmailVerificationProperties implements EmailVerificationPolicyPort 
 	private int maxCodeAttempts = 5;
 	private int resendSeconds = 60;
 	private int emailHourlyLimit = 5;
-	private int originHourlyLimit = 30;
-	private long cleanupIntervalMs = 3_600_000;
 
 	@PostConstruct
 	public void validate() {
-		if (maxCodeAttempts < 1 || resendSeconds < 1 || emailHourlyLimit < 1 || originHourlyLimit < 1
-				|| cleanupIntervalMs < 1000 || cleanupIntervalMs > 86_400_000) {
+		if (maxCodeAttempts < 1 || resendSeconds < 1 || emailHourlyLimit < 1) {
 			throw new IllegalStateException("Invalid email verification limits");
 		}
 	}
@@ -40,10 +37,5 @@ public class EmailVerificationProperties implements EmailVerificationPolicyPort 
 	@Override
 	public int emailHourlyLimit() {
 		return emailHourlyLimit;
-	}
-
-	@Override
-	public int originHourlyLimit() {
-		return originHourlyLimit;
 	}
 }

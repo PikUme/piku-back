@@ -99,7 +99,7 @@ class AuthControllerTest {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.message").value("회원가입 인증 이메일이 발송되었습니다."));
 
-		then(emailVerificationUseCase).should().sendEmailCode(new SendEmailVerificationCommand("user@example.com", "127.0.0.1"));
+		then(emailVerificationUseCase).should().sendEmailCode(new SendEmailVerificationCommand("user@example.com"));
 	}
 
 	@Test
@@ -111,7 +111,7 @@ class AuthControllerTest {
 						.content("{\"email\":\"not-an-email\"}"))
 				.andExpect(status().isOk());
 
-		then(emailVerificationUseCase).should().sendEmailCode(new SendEmailVerificationCommand("not-an-email", "127.0.0.1"));
+		then(emailVerificationUseCase).should().sendEmailCode(new SendEmailVerificationCommand("not-an-email"));
 	}
 
 	@Test
