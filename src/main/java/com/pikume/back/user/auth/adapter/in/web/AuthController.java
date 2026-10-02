@@ -5,6 +5,10 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import com.pikume.back.user.auth.application.port.in.EmailVerificationUseCase;
+import com.pikume.back.user.auth.application.dto.SendEmailVerificationCommand;
+import com.pikume.back.user.auth.application.dto.VerifyEmailCodeCommand;
+import com.pikume.back.user.auth.domain.vo.VerificationType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -35,6 +39,7 @@ public class AuthController {
 	private final VerifyEmailUseCase verifyEmailUseCase;
 	private final ResetPasswordUseCase resetPasswordUseCase;
 	private final QueryAllowedEmailUseCase queryAllowedEmailUseCase;
+	private final EmailVerificationUseCase emailVerificationUseCase;
 
 	@Operation(summary = "회원가입", description = "이메일, 비밀번호, 닉네임으로 회원가입을 진행합니다.")
 	@ApiResponses(value = {
@@ -44,7 +49,7 @@ public class AuthController {
 	@PostMapping("/signup")
 	public ResponseEntity<?> signup(@Valid @RequestBody SignupRequest dto) {
 		signUpUseCase.signUp(new SignUpCommand(
-				dto.getEmail(), dto.getPassword(), dto.getNickname(), dto.getFixedCharacterId()));
+				dto.getEmail(), dto.getPassword(), dto.getNickname(), dto.getFixedCharacterId(), dto.getEmailVerificationToken()));
 		return ResponseEntity.status(HttpStatus.CREATED).body(new MessageResponse("회원가입 성공"));
 	}
 
@@ -54,9 +59,12 @@ public class AuthController {
 			@ApiResponse(responseCode = "400", description = "잘못된 요청")
 	})
 	@PostMapping("/send-verification/sign-up")
-	public ResponseEntity<?> sendSignUpVerificationEmail(@Valid @RequestBody VerificationEmailRequest request) {
-		verifyEmailUseCase.sendSignUpVerificationEmail(request.email());
-		return ResponseEntity.ok(new MessageResponse("회원가입 인증 이메일이 발송되었습니다."));
+	public ResponseEntity<?> sendSignUpVerificationEmail(
+			@Valid @RequestBody VerificationEmailRequest request) {
+		var result = emailVerificationUseCase.sendEmailCode(new SendEmailVerificationCommand(request.email()));
+		return ResponseEntity.ok().header("Cache-Control", "no-store").body(Map.of(
+				"message", "회원가입 인증 이메일이 발송되었습니다.", "expiresAt", result.expiresAt(),
+				"resendAvailableAt", result.resendAvailableAt()));
 	}
 
 	@Operation(summary = "비밀번호 재설정 이메일 발송", description = "비밀번호 재설정을 위한 인증코드를 이메일로 발송합니다.")
@@ -73,6 +81,12 @@ public class AuthController {
 	@Operation(summary = "이메일 인증 코드 검증", description = "사용자가 입력한 인증 코드를 검증합니다.")
 	@PostMapping("/verify-code")
 	public ResponseEntity<?> verifyCode(@Valid @RequestBody EmailValidRequest dto) {
+		if (dto.getType() == VerificationType.SIGN_UP) {
+			var result = emailVerificationUseCase.verifyEmailCode(new VerifyEmailCodeCommand(dto.getEmail(), dto.getCode()));
+			return ResponseEntity.ok().header("Cache-Control", "no-store").body(Map.of(
+					"message", "이메일 인증이 완료되었습니다.", "emailVerificationToken", result.emailVerificationToken(),
+					"expiresAt", result.expiresAt()));
+		}
 		verifyEmailUseCase.verifyCode(new VerifyEmailCommand(dto.getEmail(), dto.getCode(), dto.getType()));
 		return ResponseEntity.ok(new MessageResponse("이메일 인증이 완료되었습니다."));
 	}

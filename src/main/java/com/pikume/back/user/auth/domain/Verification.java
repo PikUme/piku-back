@@ -5,7 +5,6 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import com.pikume.back.user.auth.domain.vo.VerificationType;
 import com.pikume.back.user.domain.vo.Email;
-
 import java.time.LocalDateTime;
 
 @Entity
@@ -24,6 +23,7 @@ public class Verification {
 	@Column(nullable = false)
 	private String code;
 
+	// 회원가입 인증의 발송·만료·소비 시각은 모두 한국 시간으로 저장하고 비교한다.
 	@Column(nullable = false)
 	private LocalDateTime expiresAt;
 
@@ -38,12 +38,12 @@ public class Verification {
 		this.expiresAt = expiresAt;
 	}
 
-	public void updateCode(String newCode, LocalDateTime newExpiresAt) {
-		this.code = newCode;
-		this.expiresAt = newExpiresAt;
-	}
-
 	public boolean matches(String submittedCode, VerificationType submittedType) {
 		return type == submittedType && code.equals(submittedCode);
+	}
+
+	public void updateCode(String newCode, LocalDateTime newExpiresAt) {
+		code = newCode;
+		expiresAt = newExpiresAt;
 	}
 }
