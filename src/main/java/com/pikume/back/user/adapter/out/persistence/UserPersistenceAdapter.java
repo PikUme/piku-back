@@ -9,6 +9,7 @@ import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Repository;
 
+import java.sql.SQLException;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -19,10 +20,12 @@ import java.util.regex.Pattern;
 @Repository
 @RequiredArgsConstructor
 public class UserPersistenceAdapter implements RecordUserAccountPort {
+
 	private static final String EMAIL_UNIQUE_CONSTRAINT = "uk6dotkott2kjsp8vw4d0m25fb7";
 	private static final String NICKNAME_UNIQUE_CONSTRAINT = "uk2ty1xmrrgtn89xt7kyxx6ta7h";
 	private static final int MYSQL_DUPLICATE_KEY_ERROR_CODE = 1062;
-	private static final Pattern MYSQL_DUPLICATE_KEY_NAME = Pattern.compile("for key ['\\\"]([^'\\\"]+)['\\\"]", Pattern.CASE_INSENSITIVE);
+	private static final Pattern MYSQL_DUPLICATE_KEY_NAME = Pattern.compile(
+			"for key ['\\\"]([^'\\\"]+)['\\\"]\\s*$", Pattern.CASE_INSENSITIVE);
 
 	private final UserJpaRepository jpaRepository;
 
@@ -55,11 +58,18 @@ public class UserPersistenceAdapter implements RecordUserAccountPort {
 		}
 
 		for (Throwable current = throwable; current != null; current = current.getCause()) {
-			if (current instanceof java.sql.SQLException sqlException
+			if (current instanceof SQLException sqlException
 					&& sqlException.getErrorCode() == MYSQL_DUPLICATE_KEY_ERROR_CODE) {
-				Matcher matcher = MYSQL_DUPLICATE_KEY_NAME.matcher(sqlException.getMessage());
-				if (matcher.find()) {
-					String keyName = matcher.group(1);
+				String message = sqlException.getMessage();
+				if (message == null) {
+					continue;
+				}
+				Matcher matcher = MYSQL_DUPLICATE_KEY_NAME.matcher(message);
+				String keyName = null;
+				while (matcher.find()) {
+					keyName = matcher.group(1);
+				}
+				if (keyName != null) {
 					int qualifierSeparator = keyName.lastIndexOf('.');
 					return normalize(qualifierSeparator >= 0
 							? keyName.substring(qualifierSeparator + 1)
