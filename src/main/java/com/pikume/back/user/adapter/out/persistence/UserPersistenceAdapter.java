@@ -160,8 +160,7 @@ public class UserPersistenceAdapter implements RecordUserAccountPort {
 	 * @return 닉네임 제약이면 {@code true}
 	 */
 	private boolean isNicknameConstraint(String constraintName) {
-		return constraintName.equals(NICKNAME_UNIQUE_CONSTRAINT)
-				|| constraintName.equals("users(nickname)");
+		return constraintName.equals(NICKNAME_UNIQUE_CONSTRAINT);
 	}
 
 	/**
@@ -171,8 +170,7 @@ public class UserPersistenceAdapter implements RecordUserAccountPort {
 	 * @return 이메일 제약이면 {@code true}
 	 */
 	private boolean isEmailConstraint(String constraintName) {
-		return constraintName.equals(EMAIL_UNIQUE_CONSTRAINT)
-				|| constraintName.equals("users(email)");
+		return constraintName.equals(EMAIL_UNIQUE_CONSTRAINT);
 	}
 
 	/**

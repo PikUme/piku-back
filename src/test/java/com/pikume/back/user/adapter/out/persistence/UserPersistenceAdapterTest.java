@@ -6,6 +6,8 @@ import com.pikume.back.user.domain.exception.EmailAlreadyExistsException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.hibernate.exception.ConstraintViolationException;
@@ -47,11 +49,12 @@ class UserPersistenceAdapterTest {
 				.isInstanceOf(EmailAlreadyExistsException.class);
 	}
 
-	@Test
+	@ParameterizedTest
+	@ValueSource(strings = {"uk_users_unknown", "users(email)", "users(nickname)"})
 	@DisplayName("알 수 없는 유일 제약 위반은 저장 기술 예외를 임의로 번역하지 않는다")
-	void preservesUnknownConstraintViolation() {
+	void preservesUnknownConstraintViolation(String constraintName) {
 		User user = new User("user@example.com", "password", "nickname", 1L);
-		DataIntegrityViolationException failure = uniqueConstraintFailure("uk_users_unknown");
+		DataIntegrityViolationException failure = uniqueConstraintFailure(constraintName);
 		given(userJpaRepository.saveAndFlush(user)).willThrow(failure);
 
 		assertThatThrownBy(() -> new UserPersistenceAdapter(userJpaRepository).recordUserAccount(user))
