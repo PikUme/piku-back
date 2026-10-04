@@ -96,10 +96,34 @@ class UserPersistenceAdapterTest {
 	}
 
 	@Test
+	@DisplayName("중복 값 안의 for key 구절을 실제 MySQL 키 이름으로 오인하지 않는다")
+	void preservesUnknownMysqlDuplicateKeyWhenValueContainsKeyPhrase() {
+		User user = new User("user@example.com", "password", "nickname", 1L);
+		DataIntegrityViolationException failure = mysqlDuplicateKeyFailure(
+				"Duplicate entry 'value for key 'UK6dotkott2kjsp8vw4d0m25fb7' tail' "
+						+ "for key 'users.uk_users_external_id'");
+		given(userJpaRepository.saveAndFlush(user)).willThrow(failure);
+
+		assertThatThrownBy(() -> new UserPersistenceAdapter(userJpaRepository).recordUserAccount(user))
+				.isSameAs(failure);
+	}
+
+	@Test
 	@DisplayName("MySQL 1062 오류의 키가 없으면 알 수 없는 무결성 오류를 번역하지 않는다")
 	void preservesMysqlDuplicateKeyWithoutKnownKeyName() {
 		User user = new User("user@example.com", "password", "nickname", 1L);
 		DataIntegrityViolationException failure = mysqlDuplicateKeyFailure("Duplicate entry 'user@example.com'");
+		given(userJpaRepository.saveAndFlush(user)).willThrow(failure);
+
+		assertThatThrownBy(() -> new UserPersistenceAdapter(userJpaRepository).recordUserAccount(user))
+				.isSameAs(failure);
+	}
+
+	@Test
+	@DisplayName("MySQL 예외 메시지가 없으면 알 수 없는 무결성 오류를 번역하지 않는다")
+	void preservesMysqlDuplicateKeyWithoutMessage() {
+		User user = new User("user@example.com", "password", "nickname", 1L);
+		DataIntegrityViolationException failure = mysqlDuplicateKeyFailure(null);
 		given(userJpaRepository.saveAndFlush(user)).willThrow(failure);
 
 		assertThatThrownBy(() -> new UserPersistenceAdapter(userJpaRepository).recordUserAccount(user))
