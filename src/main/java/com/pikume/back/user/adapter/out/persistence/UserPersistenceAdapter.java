@@ -129,7 +129,7 @@ public class UserPersistenceAdapter implements RecordUserAccountPort {
 	}
 
 	/**
-	 * 이메일·닉네임 제약 여부 확인
+	 * 전달받은 제약 이름이 이메일·닉네임 중복 제약인지 확인
 	 *
 	 * @param constraintName 비교용 제약 이름
 	 * @return 이메일 또는 닉네임 제약이면 {@code true}
@@ -139,13 +139,7 @@ public class UserPersistenceAdapter implements RecordUserAccountPort {
 	}
 
 	/**
-	 * Hibernate 제약 이름 정리
-	 *
-	 * <ul>
-	 * <li>소문자로 변환 후 백틱·큰따옴표·공백 제거</li>
-	 * <li>제약 이름 앞의 테이블·스키마 이름 제거</li>
-	 * <li>H2의 {@code _INDEX_숫자} 접미사 제거</li>
-	 * </ul>
+	 * DB에서 받은 제약 이름을 중복 판별에 사용할 형태로 정리
 	 *
 	 * @param constraintName Hibernate가 전달한 제약 이름
 	 * @return 비교용 제약 이름, 입력이 {@code null}이면 빈 문자열
@@ -160,7 +154,7 @@ public class UserPersistenceAdapter implements RecordUserAccountPort {
 	}
 
 	/**
-	 * 닉네임 고유 제약 또는 H2의 {@code users(nickname)} 표기와 일치 여부 확인
+	 * 전달받은 제약 이름이 닉네임 중복 제약인지 확인
 	 *
 	 * @param constraintName 비교용 제약 이름
 	 * @return 닉네임 제약이면 {@code true}
@@ -171,7 +165,7 @@ public class UserPersistenceAdapter implements RecordUserAccountPort {
 	}
 
 	/**
-	 * 이메일 고유 제약 또는 H2의 {@code users(email)} 표기와 일치 여부 확인
+	 * 전달받은 제약 이름이 이메일 중복 제약인지 확인
 	 *
 	 * @param constraintName 비교용 제약 이름
 	 * @return 이메일 제약이면 {@code true}
