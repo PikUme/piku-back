@@ -10,6 +10,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import com.pikume.back.global.notification.dto.DiscordEmbed;
 import com.pikume.back.global.notification.dto.DiscordMessage;
 import com.pikume.back.global.notification.dto.EmbedField;
+import com.pikume.back.global.notification.dto.OperationalAlert;
 
 import java.awt.Color;
 import java.net.URI;
@@ -39,22 +40,61 @@ public class DiscordWebhookService {
 
     public void sendExceptionNotification(Exception e, HttpServletRequest request) {
         try {
-            DiscordMessage discordMessage = getDiscordMessage(e, request);
-
-            webClientBuilder.build()
-                .post()
-                .uri(webhookUrl)
-                .bodyValue(discordMessage)
-                .retrieve()
-                .bodyToMono(Void.class)
-                .timeout(REQUEST_TIMEOUT)
-                .subscribe(
-                        ignored -> { },
-                        this::recordFailure,
-                        this::recordSuccess);
+            send(getDiscordMessage(e, request), "exception_notification");
         } catch (RuntimeException failure) {
-            recordFailure(failure);
+            recordFailure("exception_notification", failure);
         }
+    }
+
+    public void sendOperationalAlert(OperationalAlert alert) {
+        if (alert == null) {
+            recordFailure("operational_alert", new IllegalArgumentException("Operational alert is required"));
+            return;
+        }
+
+        List<EmbedField> fields = List.of(
+                new EmbedField("Environment", safeValue(alert.environment()), false),
+                new EmbedField("Occurred At (KST)", safeValue(alert.occurredAt()), false),
+                new EmbedField("API Path", safeValue(alert.requestPath()), false),
+                new EmbedField("API Method", safeValue(alert.requestMethod()), false),
+                new EmbedField("Processing Stage", safeValue(alert.processingStage()), false),
+                new EmbedField("Error Type", safeValue(alert.errorType()), false),
+                new EmbedField("Response Status", safeValue(alert.responseStatus()), false));
+        DiscordEmbed embed = new DiscordEmbed(
+                "⚠️ Operational alert",
+                null,
+                Color.RED.getRGB() & 0xFFFFFF,
+                fields);
+        send(new DiscordMessage(safeValue(alert.title()), List.of(embed)), "operational_alert");
+    }
+
+    private void send(DiscordMessage discordMessage, String notificationType) {
+        try {
+            webClientBuilder.build()
+                    .post()
+                    .uri(webhookUrl)
+                    .bodyValue(discordMessage)
+                    .retrieve()
+                    .bodyToMono(Void.class)
+                    .timeout(REQUEST_TIMEOUT)
+                    .subscribe(
+                            ignored -> { },
+                            failure -> recordFailure(notificationType, failure),
+                            () -> recordSuccess(notificationType));
+        } catch (RuntimeException failure) {
+            recordFailure(notificationType, failure);
+        }
+    }
+
+    private static String safeValue(Object value) {
+        if (value == null) {
+            return "unknown";
+        }
+        String text = String.valueOf(value);
+        if (text.isBlank()) {
+            return "unknown";
+        }
+        return text.length() <= 1024 ? text : text.substring(0, 1024);
     }
 
     private String validateWebhookUrl(String configuredUrl) {
@@ -73,14 +113,14 @@ public class DiscordWebhookService {
         return configuredUrl;
     }
 
-    private void recordSuccess() {
+    private void recordSuccess(String notificationType) {
         meterRegistry.counter(NOTIFICATION_METRIC, "outcome", "success").increment();
-        log.debug("event=exception_notification outcome=success");
+        log.debug("event={} outcome=success", notificationType);
     }
 
-    private void recordFailure(Throwable failure) {
+    private void recordFailure(String notificationType, Throwable failure) {
         meterRegistry.counter(NOTIFICATION_METRIC, "outcome", "failure").increment();
-        log.error("event=exception_notification outcome=failed exception={}",
+        log.error("event={} outcome=failed exception={}", notificationType,
                 failure.getClass().getSimpleName());
     }
 

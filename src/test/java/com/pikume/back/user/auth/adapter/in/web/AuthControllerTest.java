@@ -19,6 +19,7 @@ import com.pikume.back.user.adapter.in.web.UserExceptionHandler;
 import com.pikume.back.user.auth.application.port.in.ResetPasswordUseCase;
 import com.pikume.back.user.auth.application.port.in.SignUpUseCase;
 import com.pikume.back.user.auth.application.port.in.VerifyEmailUseCase;
+import com.pikume.back.user.auth.application.port.in.EmailVerificationUseCase;
 import com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase;
 import com.pikume.back.user.auth.application.dto.ResetPasswordCommand;
 import com.pikume.back.user.auth.application.dto.SignUpCommand;
@@ -55,6 +56,9 @@ class AuthControllerTest {
 	private VerifyEmailUseCase verifyEmailUseCase;
 
 	@Mock
+	private EmailVerificationUseCase emailVerificationUseCase;
+
+	@Mock
 	private ResetPasswordUseCase resetPasswordUseCase;
 
 	@Mock
@@ -68,6 +72,7 @@ class AuthControllerTest {
 		authController = new AuthController(
 				signUpUseCase,
 				verifyEmailUseCase,
+				emailVerificationUseCase,
 				resetPasswordUseCase,
 				queryAllowedEmailUseCase);
 		ProblemDetailFactory problemDetailFactory = new ProblemDetailFactory();
@@ -91,7 +96,7 @@ class AuthControllerTest {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.message").value("회원가입 인증 이메일이 발송되었습니다."));
 
-		then(verifyEmailUseCase).should().sendSignUpVerificationEmail("user@example.com");
+		then(emailVerificationUseCase).should().sendSignUpVerificationEmail("user@example.com");
 	}
 
 	@Test
@@ -102,7 +107,7 @@ class AuthControllerTest {
 						.content("{\"email\":\"not-an-email\"}"))
 				.andExpect(status().isOk());
 
-		then(verifyEmailUseCase).should().sendSignUpVerificationEmail("not-an-email");
+		then(emailVerificationUseCase).should().sendSignUpVerificationEmail("not-an-email");
 	}
 
 	@Test
@@ -115,7 +120,7 @@ class AuthControllerTest {
 				.andExpect(jsonPath("$.status").value(400))
 				.andExpect(jsonPath("$.fieldErrors.email").exists());
 
-		then(verifyEmailUseCase).shouldHaveNoInteractions();
+		then(emailVerificationUseCase).shouldHaveNoInteractions();
 	}
 
 	@Test
@@ -148,9 +153,10 @@ class AuthControllerTest {
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"email\":\"user@example.com\",\"code\":\"123456\",\"type\":\"SIGN_UP\"}"))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.message").value("이메일 인증이 완료되었습니다."));
+				.andExpect(jsonPath("$.message").value("이메일 인증이 완료되었습니다."))
+				.andExpect(jsonPath("$.emailVerificationToken").doesNotExist());
 
-		then(verifyEmailUseCase).should().verifyCode(any());
+		then(emailVerificationUseCase).should().verifySignUpVerificationCode("user@example.com", "123456");
 	}
 
 	@Test
@@ -175,8 +181,19 @@ class AuthControllerTest {
 						.content("{\"email\":\"user!tag@example.com\",\"code\":\"123456\",\"type\":\"SIGN_UP\"}"))
 				.andExpect(status().isOk());
 
+		then(emailVerificationUseCase).should().verifySignUpVerificationCode("user!tag@example.com", "123456");
+	}
+
+	@Test
+	@DisplayName("POST /api/auth/verify-code는 비밀번호 재설정 코드를 MySQL 유스케이스에 위임한다")
+	void verifyPasswordResetCodeUsesExistingUseCase() throws Exception {
+		mockMvc.perform(post("/api/auth/verify-code")
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("{\"email\":\"user@example.com\",\"code\":\"123456\",\"type\":\"PASSWORD_RESET\"}"))
+				.andExpect(status().isOk());
+
 		then(verifyEmailUseCase).should().verifyCode(
-				new VerifyEmailCommand("user!tag@example.com", "123456", VerificationType.SIGN_UP));
+				new VerifyEmailCommand("user@example.com", "123456", VerificationType.PASSWORD_RESET));
 	}
 
 	@Test

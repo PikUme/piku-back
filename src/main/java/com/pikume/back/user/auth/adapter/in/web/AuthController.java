@@ -13,6 +13,8 @@ import com.pikume.back.global.dto.MessageResponse;
 import com.pikume.back.user.auth.application.port.in.ResetPasswordUseCase;
 import com.pikume.back.user.auth.application.port.in.SignUpUseCase;
 import com.pikume.back.user.auth.application.port.in.VerifyEmailUseCase;
+import com.pikume.back.user.auth.application.port.in.EmailVerificationUseCase;
+import com.pikume.back.user.auth.domain.vo.VerificationType;
 import com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase;
 import com.pikume.back.user.auth.application.dto.SignUpCommand;
 import com.pikume.back.user.auth.application.dto.VerifyEmailCommand;
@@ -33,6 +35,7 @@ public class AuthController {
 
 	private final SignUpUseCase signUpUseCase;
 	private final VerifyEmailUseCase verifyEmailUseCase;
+	private final EmailVerificationUseCase emailVerificationUseCase;
 	private final ResetPasswordUseCase resetPasswordUseCase;
 	private final QueryAllowedEmailUseCase queryAllowedEmailUseCase;
 
@@ -51,11 +54,12 @@ public class AuthController {
 	@Operation(summary = "회원가입 이메일 발송", description = "회원가입시 사용자 본인인증과 이메일 중복확인을 위해 인증코드를 이메일로 발송합니다.")
 	@ApiResponses(value = {
 			@ApiResponse(responseCode = "200", description = "인증 이메일 발송 성공"),
-			@ApiResponse(responseCode = "400", description = "잘못된 요청")
+			@ApiResponse(responseCode = "400", description = "잘못된 요청"),
+			@ApiResponse(responseCode = "503", description = "이메일 인증 저장소 또는 메일 발송을 사용할 수 없음")
 	})
 	@PostMapping("/send-verification/sign-up")
 	public ResponseEntity<?> sendSignUpVerificationEmail(@Valid @RequestBody VerificationEmailRequest request) {
-		verifyEmailUseCase.sendSignUpVerificationEmail(request.email());
+		emailVerificationUseCase.sendSignUpVerificationEmail(request.email());
 		return ResponseEntity.ok(new MessageResponse("회원가입 인증 이메일이 발송되었습니다."));
 	}
 
@@ -71,9 +75,18 @@ public class AuthController {
 	}
 
 	@Operation(summary = "이메일 인증 코드 검증", description = "사용자가 입력한 인증 코드를 검증합니다.")
+	@ApiResponses(value = {
+			@ApiResponse(responseCode = "200", description = "이메일 인증 성공"),
+			@ApiResponse(responseCode = "400", description = "잘못된 코드 또는 요청"),
+			@ApiResponse(responseCode = "503", description = "이메일 인증 저장소를 사용할 수 없음")
+	})
 	@PostMapping("/verify-code")
 	public ResponseEntity<?> verifyCode(@Valid @RequestBody EmailValidRequest dto) {
-		verifyEmailUseCase.verifyCode(new VerifyEmailCommand(dto.getEmail(), dto.getCode(), dto.getType()));
+		if (dto.getType() == VerificationType.SIGN_UP) {
+			emailVerificationUseCase.verifySignUpVerificationCode(dto.getEmail(), dto.getCode());
+		} else {
+			verifyEmailUseCase.verifyCode(new VerifyEmailCommand(dto.getEmail(), dto.getCode(), dto.getType()));
+		}
 		return ResponseEntity.ok(new MessageResponse("이메일 인증이 완료되었습니다."));
 	}
 

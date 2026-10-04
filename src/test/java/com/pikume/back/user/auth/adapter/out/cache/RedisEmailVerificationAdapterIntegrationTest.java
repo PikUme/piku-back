@@ -1,0 +1,146 @@
+package com.pikume.back.user.auth.adapter.out.cache;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.pikume.back.user.auth.application.dto.SignupEmailProof;
+import com.pikume.back.user.auth.application.port.out.EmailVerificationStorePort.VerificationResult;
+import com.pikume.back.user.auth.application.service.EmailVerificationService;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.Executors;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+
+@Testcontainers
+class RedisEmailVerificationAdapterIntegrationTest {
+
+	private static final DefaultRedisScript<Long> REDIS_TIME_MILLIS = new DefaultRedisScript<>(
+			"local t=redis.call('TIME'); return t[1]*1000+math.floor(t[2]/1000)", Long.class);
+
+	@Container
+	private static final GenericContainer<?> REDIS = new GenericContainer<>("redis:7.4-alpine").withExposedPorts(6379);
+	private static LettuceConnectionFactory connectionFactory;
+	private static StringRedisTemplate redis;
+	private static RedisEmailVerificationAdapter adapter;
+
+	@BeforeAll
+	static void connect() {
+		connectionFactory = new LettuceConnectionFactory(REDIS.getHost(), REDIS.getMappedPort(6379));
+		connectionFactory.afterPropertiesSet();
+		redis = new StringRedisTemplate(connectionFactory);
+		redis.afterPropertiesSet();
+		adapter = new RedisEmailVerificationAdapter(redis);
+	}
+
+	@AfterAll
+	static void closeConnection() {
+		if (connectionFactory != null) {
+			connectionFactory.destroy();
+		}
+	}
+
+	@AfterEach
+	void clearTestKeys() {
+		redis.getConnectionFactory().getConnection().serverCommands().flushDb();
+	}
+
+	@Test
+	void codeAndVerifiedProofUseRedisServerDeadlinesWithFiveAndTenMinuteTtls() {
+		String emailKey = EmailVerificationService.hash("signup@example.com");
+		String codeHash = EmailVerificationService.hash("123456");
+		String generation = UUID.randomUUID().toString();
+		adapter.reserve(emailKey, generation, codeHash);
+		assertThat(adapter.activate(emailKey, generation)).isTrue();
+		String codeKey = key(emailKey, ":auth");
+		assertThat(redis.getExpire(codeKey)).isBetween(299L, 300L);
+
+		long redisNow = redis.execute(REDIS_TIME_MILLIS, List.of());
+		assertThat(adapter.verify(emailKey, codeHash)).isEqualTo(VerificationResult.VERIFIED);
+
+		SignupEmailProof proof = adapter.loadProof(emailKey).orElseThrow();
+		assertThat(proof.expiresAt()).isBetween(kstDateTime(redisNow + 599_000), kstDateTime(redisNow + 601_000));
+		assertThat(redis.getExpire(key(emailKey, ":proof"))).isBetween(599L, 600L);
+	}
+
+	@Test
+	void concurrentCodeVerificationCanCreateOnlyOneEmailProof() throws Exception {
+		String emailKey = EmailVerificationService.hash("verify-race@example.com");
+		String codeHash = EmailVerificationService.hash("123456");
+		adapter.reserve(emailKey, "generation", codeHash);
+		adapter.activate(emailKey, "generation");
+		var executor = Executors.newFixedThreadPool(2);
+		try {
+			var first = executor.submit(() -> adapter.verify(emailKey, codeHash));
+			var second = executor.submit(() -> adapter.verify(emailKey, codeHash));
+			List<VerificationResult> results = List.of(first.get(), second.get());
+
+			assertThat(results).containsExactlyInAnyOrder(VerificationResult.VERIFIED, VerificationResult.NOT_FOUND);
+			assertThat(adapter.loadProof(emailKey)).isPresent();
+		} finally {
+			executor.shutdownNow();
+		}
+	}
+
+	@Test
+	void staleSmtpCompletionCannotActivateANewerCodeGeneration() {
+		String emailKey = EmailVerificationService.hash("late-mail@example.com");
+		String firstCode = EmailVerificationService.hash("111111");
+		String secondCode = EmailVerificationService.hash("222222");
+		adapter.reserve(emailKey, "old-generation", firstCode);
+		adapter.reserve(emailKey, "new-generation", secondCode);
+
+		assertThat(adapter.activate(emailKey, "old-generation")).isFalse();
+		assertThat(adapter.activate(emailKey, "new-generation")).isTrue();
+		assertThat(adapter.verify(emailKey, firstCode)).isEqualTo(VerificationResult.MISMATCH);
+		assertThat(adapter.verify(emailKey, secondCode)).isEqualTo(VerificationResult.VERIFIED);
+	}
+
+	@Test
+	void conditionalCleanupCannotDeleteANewerVerifiedProof() {
+		String emailKey = EmailVerificationService.hash("proof-version@example.com");
+		verifyCode(emailKey, "111111", "first-generation");
+		SignupEmailProof firstProof = adapter.loadProof(emailKey).orElseThrow();
+		verifyCode(emailKey, "222222", "second-generation");
+		SignupEmailProof secondProof = adapter.loadProof(emailKey).orElseThrow();
+
+		assertThat(adapter.removeProofIfVersionMatches(emailKey, firstProof.version())).isFalse();
+		assertThat(adapter.loadProof(emailKey)).contains(secondProof);
+	}
+
+	@Test
+	void wrongCodeDoesNotCreateEmailProof() {
+		String emailKey = EmailVerificationService.hash("wrong-code@example.com");
+		String codeHash = EmailVerificationService.hash("123456");
+		adapter.reserve(emailKey, "generation", codeHash);
+		adapter.activate(emailKey, "generation");
+
+		assertThat(adapter.verify(emailKey, EmailVerificationService.hash("654321")))
+				.isEqualTo(VerificationResult.MISMATCH);
+		assertThat(adapter.loadProof(emailKey)).isEmpty();
+	}
+
+	private static void verifyCode(String emailKey, String code, String generation) {
+		String codeHash = EmailVerificationService.hash(code);
+		adapter.reserve(emailKey, generation, codeHash);
+		adapter.activate(emailKey, generation);
+		assertThat(adapter.verify(emailKey, codeHash)).isEqualTo(VerificationResult.VERIFIED);
+	}
+
+	private static String key(String emailKey, String suffix) {
+		return "signup-email:{" + emailKey + "}" + suffix;
+	}
+
+	private static LocalDateTime kstDateTime(long millis) {
+		return LocalDateTime.of(1970, 1, 1, 9, 0).plus(millis, ChronoUnit.MILLIS);
+	}
+}

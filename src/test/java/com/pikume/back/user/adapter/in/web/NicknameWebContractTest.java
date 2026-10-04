@@ -15,17 +15,21 @@ import com.pikume.back.user.application.service.UserProfileCommandService;
 import com.pikume.back.user.auth.adapter.in.web.AuthController;
 import com.pikume.back.user.auth.adapter.in.web.AuthExceptionHandler;
 import com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase;
+import com.pikume.back.user.auth.application.port.in.EmailVerificationUseCase;
 import com.pikume.back.user.auth.application.port.out.CheckSignUpCharacterSelectionPort;
+import com.pikume.back.user.auth.application.port.out.EmailVerificationOperationsAlertPort;
+import com.pikume.back.user.auth.application.port.out.EmailVerificationStorePort;
 import com.pikume.back.user.auth.application.port.out.IssueVerificationEmailPort;
 import com.pikume.back.user.auth.application.port.out.LoadCompletedEmailVerificationPort;
 import com.pikume.back.user.auth.application.port.out.LoadVerificationPort;
 import com.pikume.back.user.auth.application.port.out.ManageVerificationPort;
 import com.pikume.back.user.auth.application.port.out.PasswordProtectionPort;
 import com.pikume.back.user.auth.application.port.out.RecordCompletedEmailVerificationPort;
+import com.pikume.back.user.auth.application.port.out.SignUpTransactionPort;
+import com.pikume.back.user.auth.application.dto.SignupEmailProof;
 import com.pikume.back.user.auth.application.service.AuthService;
-import com.pikume.back.user.auth.domain.VerifiedEmail;
+import com.pikume.back.user.auth.application.service.EmailVerificationService;
 import com.pikume.back.user.auth.domain.service.EmailVerificationPolicy;
-import com.pikume.back.user.auth.domain.vo.VerificationType;
 import com.pikume.back.user.domain.User;
 import com.pikume.back.user.domain.exception.NicknameAlreadyExistsException;
 import com.pikume.back.user.domain.service.NicknamePolicy;
@@ -53,6 +57,7 @@ import org.springframework.web.method.support.ModelAndViewContainer;
 
 import java.util.HashSet;
 import java.util.Optional;
+import java.time.LocalDateTime;
 import java.util.Set;
 import java.util.stream.Stream;
 
@@ -76,7 +81,7 @@ class NicknameWebContractTest {
 	private MockMvc mockMvc;
 	private TestUserAccountStore userAccountStore;
 	private InMemoryNicknameHoldAdapter nicknameHoldAdapter;
-	private LoadCompletedEmailVerificationPort loadCompletedEmailVerificationPort;
+	private EmailVerificationStorePort emailVerificationStorePort;
 	private CheckSignUpCharacterSelectionPort checkSignUpCharacterSelectionPort;
 	private PasswordProtectionPort passwordProtectionPort;
 	private ResolveFixedCharacterAvatarPort fixedCharacterAvatarPort;
@@ -86,27 +91,30 @@ class NicknameWebContractTest {
 	void setUp() {
 		userAccountStore = new TestUserAccountStore();
 		nicknameHoldAdapter = new InMemoryNicknameHoldAdapter(new NicknamePolicy());
-		loadCompletedEmailVerificationPort = mock(LoadCompletedEmailVerificationPort.class);
+		emailVerificationStorePort = mock(EmailVerificationStorePort.class);
 		checkSignUpCharacterSelectionPort = mock(CheckSignUpCharacterSelectionPort.class);
 		passwordProtectionPort = mock(PasswordProtectionPort.class);
 		fixedCharacterAvatarPort = mock(ResolveFixedCharacterAvatarPort.class);
 		resolveObjectUrlPort = mock(ResolveObjectUrlPort.class);
 
 		QueryAllowedEmailUseCase queryAllowedEmailUseCase = mock(QueryAllowedEmailUseCase.class);
+		SignUpTransactionPort signUpTransactionPort = userAccountStore::recordUserAccount;
 		AuthService authService = new AuthService(
 				mock(LoadUserForPasswordResetPort.class),
 				userAccountStore,
 				userAccountStore,
 				mock(LoadVerificationPort.class),
 				mock(ManageVerificationPort.class),
-				loadCompletedEmailVerificationPort,
+				mock(LoadCompletedEmailVerificationPort.class),
 				mock(RecordCompletedEmailVerificationPort.class),
 				mock(IssueVerificationEmailPort.class),
 				passwordProtectionPort,
 				checkSignUpCharacterSelectionPort,
-				queryAllowedEmailUseCase,
 				new EmailVerificationPolicy(),
-				new PasswordPolicy());
+				new PasswordPolicy(),
+				emailVerificationStorePort,
+				mock(EmailVerificationOperationsAlertPort.class),
+				signUpTransactionPort);
 		UserProfileCommandService profileService = new UserProfileCommandService(
 				userAccountStore,
 				userAccountStore,
@@ -118,6 +126,7 @@ class NicknameWebContractTest {
 		AuthController authController = new AuthController(
 				authService,
 				authService,
+				mock(EmailVerificationUseCase.class),
 				authService,
 				queryAllowedEmailUseCase);
 		UserController userController = new UserController(
@@ -386,8 +395,8 @@ class NicknameWebContractTest {
 	}
 
 	private void prepareSignup(String email) {
-		given(loadCompletedEmailVerificationPort.loadLatestVerification(email, VerificationType.SIGN_UP))
-				.willReturn(Optional.of(new VerifiedEmail(email, VerificationType.SIGN_UP)));
+		given(emailVerificationStorePort.loadProof(EmailVerificationService.hash(email)))
+				.willReturn(Optional.of(new SignupEmailProof("proof-version", LocalDateTime.now().plusMinutes(10))));
 		given(checkSignUpCharacterSelectionPort.isSelectableFixedCharacter(1L)).willReturn(true);
 		given(passwordProtectionPort.protect("abc@123")).willReturn("encoded-password");
 	}
