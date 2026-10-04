@@ -6,6 +6,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.reactive.function.client.ClientResponse;
@@ -66,6 +68,23 @@ class DiscordWebhookServiceTest {
 				.doesNotThrowAnyException();
 
 		assertThat(failureCount(meterRegistry)).isEqualTo(1);
+	}
+
+	@ParameterizedTest
+	@EnumSource(value = HttpStatus.class, names = {"BAD_REQUEST", "TOO_MANY_REQUESTS", "SERVICE_UNAVAILABLE"})
+	@DisplayName("웹훅 HTTP 오류 응답을 호출자에게 전파하지 않고 실패로 기록한다")
+	void isolatesHttpFailureResponse(HttpStatus responseStatus) {
+		SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+		WebClient.Builder webClientBuilder = builderFor(request ->
+				Mono.just(ClientResponse.create(responseStatus).build()));
+		DiscordWebhookService service = new DiscordWebhookService(webClientBuilder, meterRegistry, WEBHOOK_URL);
+
+		assertThatCode(() -> service.sendExceptionNotification(
+				new IllegalStateException("sensitive exception"), request()))
+				.doesNotThrowAnyException();
+
+		assertThat(failureCount(meterRegistry)).isEqualTo(1);
+		assertThat(notificationCount(meterRegistry, "success")).isZero();
 	}
 
 	@Test
