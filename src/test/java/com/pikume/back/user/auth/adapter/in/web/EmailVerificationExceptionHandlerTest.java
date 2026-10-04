@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.net.ConnectException;
 import java.net.SocketException;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -41,6 +42,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class EmailVerificationExceptionHandlerTest {
 
+	private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
 	@Test
 	void smtpFailureCauseUsesEmailVerificationAdviceBeforeAuthAdvice() throws Exception {
 		DiscordWebhookService discord = mock(DiscordWebhookService.class);
@@ -51,7 +54,9 @@ class EmailVerificationExceptionHandlerTest {
 				.andExpect(jsonPath("$.type").value(
 						"https://api.pikume.com/problems/email-verification/email-send-failed"))
 				.andExpect(jsonPath("$.status").value(503))
-				.andExpect(jsonPath("$.instance").value("/test/smtp-failure"));
+				.andExpect(jsonPath("$.instance").value("/test/smtp-failure"))
+				.andExpect(jsonPath("$.resendAvailableAt").exists())
+				.andExpect(header().exists("Retry-After"));
 
 		then(discord).shouldHaveNoInteractions();
 	}
@@ -149,15 +154,16 @@ class EmailVerificationExceptionHandlerTest {
 		@PostMapping("/test/attempts-exhausted")
 		void attemptsExhausted() {
 			throw new EmailVerificationException(EmailVerificationFailure.ATTEMPTS_EXHAUSTED,
-					LocalDateTime.now().plusMinutes(5));
+					LocalDateTime.now(KST).plusMinutes(5));
 		}
 
 		@PostMapping("/test/smtp-failure")
 		void smtpFailure() {
 			throw new EmailVerificationException(
-					EmailVerificationFailure.EMAIL_SEND_FAILED,
-					new AuthException(AuthErrorCode.EMAIL_SEND_FAILURE),
-					null);
+						EmailVerificationFailure.EMAIL_SEND_FAILED,
+						new AuthException(AuthErrorCode.EMAIL_SEND_FAILURE),
+						null,
+						LocalDateTime.now(KST).plusHours(1));
 		}
 
 		@PostMapping("/test/redis-failure/{causeType}")

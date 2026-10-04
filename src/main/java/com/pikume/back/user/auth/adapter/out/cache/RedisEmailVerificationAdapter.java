@@ -30,8 +30,13 @@ public class RedisEmailVerificationAdapter implements EmailVerificationStorePort
 			local expiresAt = now + 300000
 			local resendAvailableAt = now + 60000
 			redis.call('ZADD', KEYS[2], now, ARGV[3])
+			if redis.call('ZCARD', KEYS[2]) >= 5 then
+				local oldest = redis.call('ZRANGE', KEYS[2], 0, 0, 'WITHSCORES')
+				local hourlyRetryAt = tonumber(oldest[2]) + 3600000
+				if hourlyRetryAt > resendAvailableAt then resendAvailableAt = hourlyRetryAt end
+			end
 			redis.call('EXPIRE', KEYS[2], 3600)
-			redis.call('SET', KEYS[3], resendAvailableAt, 'PX', 60000)
+			redis.call('SET', KEYS[3], now + 60000, 'PX', 60000)
 			redis.call('HSET', KEYS[1], 'generation', ARGV[1], 'codeHash', ARGV[2],
 				'active', '0', 'deadline', expiresAt)
 			redis.call('EXPIRE', KEYS[1], 300)

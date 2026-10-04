@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.pikume.back.user.auth.application.dto.SignupEmailProof;
 import com.pikume.back.user.auth.application.exception.EmailVerificationException;
+import com.pikume.back.user.auth.application.exception.EmailVerificationFailure;
 import com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase;
 import com.pikume.back.user.auth.application.port.out.EmailVerificationStorePort.VerificationStatus;
 import com.pikume.back.user.auth.application.port.out.EmailVerificationStorePort.ReservationStatus;
@@ -13,9 +14,12 @@ import com.pikume.back.user.auth.application.port.out.IssueVerificationEmailPort
 import com.pikume.back.user.auth.application.service.EmailVerificationService;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -235,6 +239,87 @@ class RedisEmailVerificationAdapterIntegrationTest {
 	}
 
 	@Test
+	void fifthAllowedReservationReturnsTheHourlyWindowDeadline() {
+		String emailKey = EmailVerificationService.hash("fifth-success@example.com");
+		long firstSendAt = seedFourRecentSends(emailKey);
+
+		EmailVerificationStorePort.ReservationResult fifth = reserve(emailKey, "fifth-generation",
+				EmailVerificationService.hash("fifth-code"));
+
+		assertThat(fifth.status()).isEqualTo(ReservationStatus.RESERVED);
+		assertThat(fifth.resendAvailableAt()).isBetween(kstDateTime(firstSendAt + 3_355_000),
+				kstDateTime(firstSendAt + 3_365_000));
+	}
+
+	@Test
+	void fifthAllowedSmtpFailureReturnsTheHourlyWindowDeadline() {
+		String email = "fifth-failure@example.com";
+		String emailKey = EmailVerificationService.hash(email);
+		long firstSendAt = seedFourRecentSends(emailKey);
+		QueryAllowedEmailUseCase allowedEmails = Mockito.mock(QueryAllowedEmailUseCase.class);
+		BDDMockito.given(allowedEmails.isEmailAllowed(email)).willReturn(true);
+		IssueVerificationEmailPort emailSender = Mockito.mock(IssueVerificationEmailPort.class);
+		BDDMockito.willThrow(new IllegalStateException("SMTP unavailable"))
+				.given(emailSender).deliverVerificationCode(ArgumentMatchers.eq(email), ArgumentMatchers.anyString());
+		EmailVerificationService service = new EmailVerificationService(adapter, emailSender, allowedEmails);
+
+		assertThatThrownBy(() -> service.sendSignUpVerificationEmail(email))
+				.isInstanceOfSatisfying(EmailVerificationException.class, error -> {
+					assertThat(error.getReason()).isEqualTo(EmailVerificationFailure.EMAIL_SEND_FAILED);
+					assertThat(error.getRetryAt()).isBetween(kstDateTime(firstSendAt + 3_355_000),
+							kstDateTime(firstSendAt + 3_365_000));
+				});
+	}
+
+	@Test
+	void concurrentReservationsOnlyAdmitOneWithinTheCooldownAndHourlyCap() throws Exception {
+		String emailKey = EmailVerificationService.hash("concurrent-reservations@example.com");
+		seedFourRecentSends(emailKey);
+		var executor = Executors.newFixedThreadPool(12);
+		var start = new CountDownLatch(1);
+		List<Future<EmailVerificationStorePort.ReservationResult>> futures = new ArrayList<>();
+		try {
+			for (int index = 0; index < 12; index++) {
+				int request = index;
+				futures.add(executor.submit(() -> {
+					start.await();
+					return reserve(emailKey, "concurrent-generation-" + request,
+							EmailVerificationService.hash("concurrent-code-" + request));
+				}));
+			}
+			start.countDown();
+			List<ReservationStatus> statuses = new ArrayList<>();
+			for (Future<EmailVerificationStorePort.ReservationResult> future : futures) {
+				statuses.add(future.get().status());
+			}
+
+			assertThat(statuses).filteredOn(status -> status == ReservationStatus.RESERVED).hasSize(1);
+			assertThat(statuses).filteredOn(status -> status == ReservationStatus.RATE_LIMITED).hasSize(11);
+			assertThat(redis.opsForZSet().size(key(emailKey, ":send-window"))).isEqualTo(5);
+		} finally {
+			executor.shutdownNow();
+		}
+	}
+
+	@Test
+	void cooldownAndRollingHourBoundariesUseRedisTime() {
+		String cooldownBoundaryKey = EmailVerificationService.hash("cooldown-boundary@example.com");
+		redis.opsForValue().set(key(cooldownBoundaryKey, ":send-cooldown"),
+				Long.toString(redisTimeMillis()));
+		assertThat(reserve(cooldownBoundaryKey, "boundary-generation", EmailVerificationService.hash("123456"))
+				.status()).isEqualTo(ReservationStatus.RESERVED);
+
+		String hourBoundaryKey = EmailVerificationService.hash("hour-boundary@example.com");
+		long now = redisTimeMillis();
+		for (int index = 0; index < 5; index++) {
+			redis.opsForZSet().add(key(hourBoundaryKey, ":send-window"), "old-send-" + index, now - 3_600_000);
+		}
+		assertThat(reserve(hourBoundaryKey, "hour-boundary-generation", EmailVerificationService.hash("654321"))
+				.status()).isEqualTo(ReservationStatus.RESERVED);
+		assertThat(redis.opsForZSet().size(key(hourBoundaryKey, ":send-window"))).isEqualTo(1L);
+	}
+
+	@Test
 	void fifthWrongCodeLocksVerificationUntilCodeExpiry() {
 		String emailKey = EmailVerificationService.hash("attempt-limit@example.com");
 		String codeHash = EmailVerificationService.hash("123456");
@@ -255,6 +340,30 @@ class RedisEmailVerificationAdapterIntegrationTest {
 		assertThat(adapter.verify(emailKey, codeHash, "correct-version", TOKEN_HASH).status())
 				.isEqualTo(VerificationStatus.ATTEMPTS_EXHAUSTED);
 		assertThat(adapter.loadProof(emailKey, TOKEN_HASH)).isEmpty();
+	}
+
+	@Test
+	void aNewReservationAfterAttemptLockStartsWithFreshAttempts() {
+		String emailKey = EmailVerificationService.hash("attempt-reset@example.com");
+		String wrongHash = EmailVerificationService.hash("wrong-code");
+		String firstCodeHash = EmailVerificationService.hash("111111");
+		reserve(emailKey, "first-generation", firstCodeHash);
+		adapter.activate(emailKey, "first-generation");
+		for (int attempt = 0; attempt < 5; attempt++) {
+			adapter.verify(emailKey, wrongHash, "wrong-version-" + attempt, TOKEN_HASH);
+		}
+		assertThat(adapter.verify(emailKey, firstCodeHash, "locked-version", TOKEN_HASH).status())
+				.isEqualTo(VerificationStatus.ATTEMPTS_EXHAUSTED);
+
+		redis.delete(key(emailKey, ":send-cooldown"));
+		String secondCodeHash = EmailVerificationService.hash("222222");
+		reserve(emailKey, "second-generation", secondCodeHash);
+		adapter.activate(emailKey, "second-generation");
+
+		assertThat(adapter.verify(emailKey, wrongHash, "fresh-wrong-version", TOKEN_HASH).status())
+				.isEqualTo(VerificationStatus.MISMATCH);
+		assertThat(adapter.verify(emailKey, secondCodeHash, "fresh-correct-version", TOKEN_HASH).status())
+				.isEqualTo(VerificationStatus.VERIFIED);
 	}
 
 	@Test
@@ -323,6 +432,16 @@ class RedisEmailVerificationAdapterIntegrationTest {
 	private static EmailVerificationStorePort.ReservationResult reserve(String emailKey, String generation,
 			String codeHash) {
 		return adapter.reserve(emailKey, generation, codeHash, UUID.randomUUID().toString());
+	}
+
+	private static long seedFourRecentSends(String emailKey) {
+		long now = redisTimeMillis();
+		for (int index = 0; index < 4; index++) {
+			long sentAt = now - 240_000 + index * 60_000L;
+			redis.opsForZSet().add(key(emailKey, ":send-window"), "seeded-send-" + index, sentAt);
+		}
+		redis.opsForValue().set(key(emailKey, ":send-cooldown"), Long.toString(now));
+		return now;
 	}
 
 	private static String key(String emailKey, String suffix) {
