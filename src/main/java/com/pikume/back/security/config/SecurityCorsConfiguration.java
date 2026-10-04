@@ -32,7 +32,7 @@ public class SecurityCorsConfiguration {
 				"https://www.pikume.com"));
 		userConfiguration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
 		userConfiguration.setAllowedHeaders(List.of("*"));
-		userConfiguration.setExposedHeaders(List.of("Authorization"));
+		userConfiguration.setExposedHeaders(List.of("Authorization", "Retry-After"));
 		userConfiguration.setAllowCredentials(true);
 
 		UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
