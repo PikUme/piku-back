@@ -8,6 +8,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
 
 import com.pikume.back.user.auth.application.dto.SignupEmailProof;
+import com.pikume.back.user.auth.application.dto.SignupVerificationSent;
 import com.pikume.back.user.auth.application.exception.EmailVerificationException;
 import com.pikume.back.user.auth.application.exception.EmailVerificationFailure;
 import com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase;
@@ -39,14 +40,17 @@ class EmailVerificationServiceTest {
 	void sendActivatesOnlyTheGenerationWhoseEmailWasDelivered() {
 		given(allowedEmails.isEmailAllowed("user@example.com")).willReturn(true);
 		given(store.reserve(ArgumentMatchers.eq(EmailVerificationService.hash("user@example.com")),
-				ArgumentMatchers.anyString(), ArgumentMatchers.anyString()))
-				.willReturn(true);
+				ArgumentMatchers.anyString(), ArgumentMatchers.anyString(), ArgumentMatchers.anyString()))
+				.willReturn(new EmailVerificationStorePort.ReservationResult(
+						EmailVerificationStorePort.ReservationStatus.RESERVED,
+						LocalDateTime.of(2026, 10, 4, 12, 5), LocalDateTime.of(2026, 10, 4, 12, 1)));
 		given(store.activate(ArgumentMatchers.eq(EmailVerificationService.hash("user@example.com")),
 				ArgumentMatchers.anyString()))
-				.willReturn(Optional.of(LocalDateTime.now().plusMinutes(5)));
+				.willReturn(Optional.of(LocalDateTime.of(2026, 10, 4, 12, 5)));
 
-		assertThat(service.sendSignUpVerificationEmail("user@example.com"))
-				.isAfter(LocalDateTime.now().plusMinutes(4));
+		SignupVerificationSent sent = service.sendSignUpVerificationEmail("user@example.com");
+		assertThat(sent.expiresAt()).isEqualTo(LocalDateTime.of(2026, 10, 4, 12, 5));
+		assertThat(sent.resendAvailableAt()).isEqualTo(LocalDateTime.of(2026, 10, 4, 12, 1));
 
 		then(store).should().activate(ArgumentMatchers.eq(EmailVerificationService.hash("user@example.com")),
 				ArgumentMatchers.anyString());
@@ -58,8 +62,10 @@ class EmailVerificationServiceTest {
 	void failedDeliveryDoesNotActivateTheReservedCode() {
 		given(allowedEmails.isEmailAllowed("user@example.com")).willReturn(true);
 		given(store.reserve(ArgumentMatchers.eq(EmailVerificationService.hash("user@example.com")),
-				ArgumentMatchers.anyString(), ArgumentMatchers.anyString()))
-				.willReturn(true);
+				ArgumentMatchers.anyString(), ArgumentMatchers.anyString(), ArgumentMatchers.anyString()))
+				.willReturn(new EmailVerificationStorePort.ReservationResult(
+						EmailVerificationStorePort.ReservationStatus.RESERVED,
+						LocalDateTime.now().plusMinutes(5), LocalDateTime.now().plusMinutes(1)));
 		BDDMockito.willThrow(new EmailVerificationException(EmailVerificationFailure.EMAIL_SEND_FAILED))
 				.given(emailSender).deliverVerificationCode(ArgumentMatchers.eq("user@example.com"),
 						ArgumentMatchers.anyString());
@@ -80,7 +86,8 @@ class EmailVerificationServiceTest {
 				.willAnswer(invocation -> new EmailVerificationStorePort.VerificationResult(
 						EmailVerificationStorePort.VerificationStatus.VERIFIED,
 						new SignupEmailProof(
-								invocation.getArgument(2), invocation.getArgument(3), LocalDateTime.now().plusMinutes(10))));
+								invocation.getArgument(2), invocation.getArgument(3), LocalDateTime.now().plusMinutes(10)),
+						null));
 
 		var verification = service.verifySignUpVerificationCode("user@example.com", "123456");
 		assertThat(verification.token()).isNotBlank();

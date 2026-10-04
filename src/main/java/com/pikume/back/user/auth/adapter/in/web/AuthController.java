@@ -63,9 +63,10 @@ public class AuthController {
 	})
 	@PostMapping("/send-verification/sign-up")
 	public ResponseEntity<?> sendSignUpVerificationEmail(@Valid @RequestBody VerificationEmailRequest request) {
+		var sent = emailVerificationUseCase.sendSignUpVerificationEmail(request.email());
 		return ResponseEntity.ok(new SignupVerificationEmailResponse(
 				"회원가입 인증 이메일이 발송되었습니다.",
-				emailVerificationUseCase.sendSignUpVerificationEmail(request.email())));
+				sent.expiresAt(), sent.resendAvailableAt()));
 	}
 
 	@Operation(summary = "비밀번호 재설정 이메일 발송", description = "비밀번호 재설정을 위한 인증코드를 이메일로 발송합니다.")

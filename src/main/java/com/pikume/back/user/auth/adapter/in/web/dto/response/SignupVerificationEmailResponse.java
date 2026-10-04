@@ -6,5 +6,7 @@ import java.time.LocalDateTime;
 public record SignupVerificationEmailResponse(
 		String message,
 		@JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss")
-		LocalDateTime expiresAt) {
+		LocalDateTime expiresAt,
+		@JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss")
+		LocalDateTime resendAvailableAt) {
 }
