@@ -35,6 +35,8 @@ import com.pikume.back.user.domain.exception.NicknameAlreadyExistsException;
 import com.pikume.back.user.domain.service.PasswordPolicy;
 import com.pikume.back.user.domain.vo.Email;
 import java.util.Optional;
+import java.util.UUID;
+import java.time.LocalDateTime;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -62,6 +64,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Import({UserPersistenceAdapter.class, UserAccountPersistenceAdapter.class, SignUpTransactionAdapter.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class SignUpRedisMySqlIntegrationTest {
+	private static final String SIGNUP_TOKEN = "integration-signup-token";
 
 	@Container
 	private static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
@@ -128,7 +131,8 @@ class SignUpRedisMySqlIntegrationTest {
 		signup.signUp(command(email, "signup-flow-nickname"));
 
 		assertThat(users.findByEmail(new Email(email))).isPresent();
-		assertThat(store.loadProof(EmailVerificationService.hash(email))).isEmpty();
+		assertThat(store.loadProof(EmailVerificationService.hash(email), EmailVerificationService.hash(SIGNUP_TOKEN)))
+				.isEmpty();
 	}
 
 	@Test
@@ -142,7 +146,8 @@ class SignUpRedisMySqlIntegrationTest {
 		assertThatThrownBy(() -> signup.signUp(command(email, "taken-nickname")))
 				.isInstanceOf(AuthException.class);
 		assertThat(users.findByEmail(new Email(email))).isEmpty();
-		assertThat(store.loadProof(EmailVerificationService.hash(email))).isPresent();
+		assertThat(store.loadProof(EmailVerificationService.hash(email), EmailVerificationService.hash(SIGNUP_TOKEN)))
+				.isPresent();
 	}
 
 	@Test
@@ -154,8 +159,8 @@ class SignUpRedisMySqlIntegrationTest {
 		CyclicBarrier start = new CyclicBarrier(2);
 		EmailVerificationStorePort bothReadTheProof = new DelegatingStore(delegate) {
 			@Override
-			public Optional<SignupEmailProof> loadProof(String emailKey) {
-				Optional<SignupEmailProof> proof = super.loadProof(emailKey);
+			public Optional<SignupEmailProof> loadProof(String emailKey, String tokenHash) {
+				Optional<SignupEmailProof> proof = super.loadProof(emailKey, tokenHash);
 				try {
 					start.await(10, TimeUnit.SECONDS);
 				} catch (Exception exception) {
@@ -192,7 +197,8 @@ class SignUpRedisMySqlIntegrationTest {
 		authService(failingCleanup, alerts).signUp(command(email, "cleanup-nickname"));
 
 		assertThat(users.findByEmail(new Email(email))).isPresent();
-		assertThat(delegate.loadProof(EmailVerificationService.hash(email))).isPresent();
+		assertThat(delegate.loadProof(EmailVerificationService.hash(email),
+				EmailVerificationService.hash(SIGNUP_TOKEN))).isPresent();
 		verify(alerts).signupProofCleanupFailed("IllegalStateException");
 	}
 
@@ -224,8 +230,9 @@ class SignUpRedisMySqlIntegrationTest {
 		String generation = "generation-" + email;
 		store.reserve(emailKey, generation, EmailVerificationService.hash(code));
 		store.activate(emailKey, generation);
-		assertThat(store.verify(emailKey, EmailVerificationService.hash(code)))
-				.isEqualTo(EmailVerificationStorePort.VerificationResult.VERIFIED);
+		assertThat(store.verify(emailKey, EmailVerificationService.hash(code), UUID.randomUUID().toString(),
+				EmailVerificationService.hash(SIGNUP_TOKEN)).status())
+				.isEqualTo(EmailVerificationStorePort.VerificationStatus.VERIFIED);
 	}
 
 	private static String trySignup(AuthService signup, SignUpCommand command, CyclicBarrier start) throws Exception {
@@ -239,7 +246,7 @@ class SignUpRedisMySqlIntegrationTest {
 	}
 
 	private static SignUpCommand command(String email, String nickname) {
-		return new SignUpCommand(email, "abc@123", nickname, 1L);
+		return new SignUpCommand(email, "abc@123", nickname, 1L, SIGNUP_TOKEN);
 	}
 
 	private abstract static class DelegatingStore implements EmailVerificationStorePort {
@@ -255,18 +262,19 @@ class SignUpRedisMySqlIntegrationTest {
 		}
 
 		@Override
-		public boolean activate(String emailKey, String generation) {
+		public Optional<LocalDateTime> activate(String emailKey, String generation) {
 			return delegate.activate(emailKey, generation);
 		}
 
 		@Override
-		public VerificationResult verify(String emailKey, String submittedCodeHash) {
-			return delegate.verify(emailKey, submittedCodeHash);
+		public VerificationResult verify(String emailKey, String submittedCodeHash, String version, String tokenHash) {
+			return delegate.verify(emailKey, submittedCodeHash, version, tokenHash);
 		}
 
 		@Override
-		public Optional<com.pikume.back.user.auth.application.dto.SignupEmailProof> loadProof(String emailKey) {
-			return delegate.loadProof(emailKey);
+		public Optional<com.pikume.back.user.auth.application.dto.SignupEmailProof> loadProof(String emailKey,
+				String tokenHash) {
+			return delegate.loadProof(emailKey, tokenHash);
 		}
 
 		@Override

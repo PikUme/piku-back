@@ -89,7 +89,7 @@ class AuthServiceTest {
 		@Test
 		@DisplayName("유효하지 않은 닉네임은 다른 Port를 호출하기 전에 거절한다")
 		void rejectsInvalidNicknameBeforeCallingPorts() {
-			SignUpCommand command = new SignUpCommand("test@piku.store", "abc@123", " \u2003\u3000 ", 1L);
+			SignUpCommand command = new SignUpCommand("test@piku.store", "abc@123", " \u2003\u3000 ", 1L, "signup-proof-token");
 
 			assertThatThrownBy(() -> authService.signUp(command))
 					.isInstanceOf(InvalidNicknameException.class);
@@ -103,7 +103,7 @@ class AuthServiceTest {
 		@Test
 		@DisplayName("잘못된 이메일 형식을 계정 오류로 변환하고 Port를 호출하지 않는다")
 		void rejectsInvalidEmailBeforeCallingPorts() {
-			SignUpCommand command = new SignUpCommand("not-an-email", "abc@123", "테스트", 1L);
+			SignUpCommand command = new SignUpCommand("not-an-email", "abc@123", "테스트", 1L, "signup-proof-token");
 
 			assertThatThrownBy(() -> authService.signUp(command))
 					.isInstanceOfSatisfying(AuthException.class,
@@ -117,7 +117,7 @@ class AuthServiceTest {
 		@Test
 		@DisplayName("잘못된 비밀번호 형식을 계정 오류로 변환하고 Port를 호출하지 않는다")
 		void rejectsInvalidPasswordBeforeCallingPorts() {
-			SignUpCommand command = new SignUpCommand("test@piku.store", "plainPassword", "테스트", 1L);
+			SignUpCommand command = new SignUpCommand("test@piku.store", "plainPassword", "테스트", 1L, "signup-proof-token");
 
 			assertThatThrownBy(() -> authService.signUp(command))
 					.isInstanceOfSatisfying(AuthException.class,
@@ -132,12 +132,12 @@ class AuthServiceTest {
 		@Test
 		@DisplayName("유효한 요청으로 회원가입에 성공한다")
 		void signupSuccess() throws Exception {
-			SignUpCommand dto = new SignUpCommand("test@piku.store", "abc@123", " \u2003테스트\u3000 ", 1L);
+			SignUpCommand dto = new SignUpCommand("test@piku.store", "abc@123", " \u2003테스트\u3000 ", 1L, "signup-proof-token");
 
 			given(checkUserUniquenessPort.isEmailRegistered("test@piku.store")).willReturn(false);
 
-			given(emailVerificationStorePort.loadProof(EmailVerificationService.hash("test@piku.store")))
-					.willReturn(Optional.of(new SignupEmailProof("proof-version", LocalDateTime.now().plusMinutes(10))));
+			given(emailVerificationStorePort.loadProof(EmailVerificationService.hash("test@piku.store"), EmailVerificationService.hash("signup-proof-token")))
+					.willReturn(Optional.of(new SignupEmailProof("proof-version", EmailVerificationService.hash("signup-proof-token"), LocalDateTime.now().plusMinutes(10))));
 			given(passwordProtectionPort.protect("abc@123")).willReturn("encodedPw");
 			given(checkSignUpCharacterSelectionPort.isSelectableFixedCharacter(1L)).willReturn(true);
 			given(signUpTransactionPort.register(any(User.class))).willAnswer(invocation -> invocation.getArgument(0));
@@ -154,11 +154,11 @@ class AuthServiceTest {
 		@Test
 		@DisplayName("존재하지 않는 고정 캐릭터로 회원가입 시 예외가 발생하고 저장하지 않는다")
 		void signupFailFixedCharacterNotFound() throws Exception {
-			SignUpCommand dto = new SignUpCommand("test@piku.store", "abc@123", "테스트", 999L);
+			SignUpCommand dto = new SignUpCommand("test@piku.store", "abc@123", "테스트", 999L, "signup-proof-token");
 			given(checkUserUniquenessPort.isEmailRegistered("test@piku.store")).willReturn(false);
 
-			given(emailVerificationStorePort.loadProof(EmailVerificationService.hash("test@piku.store")))
-					.willReturn(Optional.of(new SignupEmailProof("proof-version", LocalDateTime.now().plusMinutes(10))));
+			given(emailVerificationStorePort.loadProof(EmailVerificationService.hash("test@piku.store"), EmailVerificationService.hash("signup-proof-token")))
+					.willReturn(Optional.of(new SignupEmailProof("proof-version", EmailVerificationService.hash("signup-proof-token"), LocalDateTime.now().plusMinutes(10))));
 			given(checkSignUpCharacterSelectionPort.isSelectableFixedCharacter(999L)).willReturn(false);
 
 			assertThatThrownBy(() -> authService.signUp(dto))
@@ -172,7 +172,11 @@ class AuthServiceTest {
 		@Test
 		@DisplayName("이미 존재하는 이메일로 회원가입 시 예외가 발생한다")
 		void signupFailDuplicateEmail() {
-			SignUpCommand dto = new SignUpCommand("dup@piku.store", "abc@123", "테스트", 1L);
+			SignUpCommand dto = new SignUpCommand("dup@piku.store", "abc@123", "테스트", 1L, "signup-proof-token");
+			given(emailVerificationStorePort.loadProof(EmailVerificationService.hash("dup@piku.store"),
+					EmailVerificationService.hash("signup-proof-token")))
+					.willReturn(Optional.of(new SignupEmailProof("proof-version",
+							EmailVerificationService.hash("signup-proof-token"), LocalDateTime.now().plusMinutes(10))));
 			given(checkUserUniquenessPort.isEmailRegistered("dup@piku.store")).willReturn(true);
 
 			assertThatThrownBy(() -> authService.signUp(dto))
@@ -184,10 +188,10 @@ class AuthServiceTest {
 		@Test
 		@DisplayName("회원가입 저장 경쟁의 이메일 충돌을 계정 오류로 변환한다")
 		void signupTranslatesEmailConflictFromPersistence() {
-			SignUpCommand command = new SignUpCommand("race@piku.store", "abc@123", "테스트", 1L);
+			SignUpCommand command = new SignUpCommand("race@piku.store", "abc@123", "테스트", 1L, "signup-proof-token");
 			given(checkUserUniquenessPort.isEmailRegistered("race@piku.store")).willReturn(false);
-			given(emailVerificationStorePort.loadProof(EmailVerificationService.hash("race@piku.store")))
-					.willReturn(Optional.of(new SignupEmailProof("proof-version", LocalDateTime.now().plusMinutes(10))));
+			given(emailVerificationStorePort.loadProof(EmailVerificationService.hash("race@piku.store"), EmailVerificationService.hash("signup-proof-token")))
+					.willReturn(Optional.of(new SignupEmailProof("proof-version", EmailVerificationService.hash("signup-proof-token"), LocalDateTime.now().plusMinutes(10))));
 			given(checkSignUpCharacterSelectionPort.isSelectableFixedCharacter(1L)).willReturn(true);
 			given(passwordProtectionPort.protect("abc@123")).willReturn("encodedPw");
 			given(signUpTransactionPort.register(any(User.class))).willThrow(new EmailAlreadyExistsException());
@@ -201,13 +205,27 @@ class AuthServiceTest {
 		@Test
 		@DisplayName("이메일 인증이 없으면 회원가입 시 예외가 발생한다")
 		void signupFailNoVerification() {
-			SignUpCommand dto = new SignUpCommand("test@piku.store", "abc@123", "테스트", 1L);
-			given(checkUserUniquenessPort.isEmailRegistered("test@piku.store")).willReturn(false);
-			given(emailVerificationStorePort.loadProof(EmailVerificationService.hash("test@piku.store")))
+			SignUpCommand dto = new SignUpCommand("test@piku.store", "abc@123", "테스트", 1L, "signup-proof-token");
+			given(emailVerificationStorePort.loadProof(EmailVerificationService.hash("test@piku.store"), EmailVerificationService.hash("signup-proof-token")))
 					.willReturn(Optional.empty());
 
 			assertThatThrownBy(() -> authService.signUp(dto))
 					.isInstanceOf(EmailVerificationException.class);
+		}
+
+		@Test
+		@DisplayName("다른 이메일 인증 토큰으로는 회원가입을 시작하지 않는다")
+		void signupRejectsMismatchedPublicTokenBeforeDatabaseLookup() {
+			SignUpCommand dto = new SignUpCommand("test@piku.store", "abc@123", "테스트", 1L, "wrong-token");
+			given(emailVerificationStorePort.loadProof(EmailVerificationService.hash("test@piku.store"),
+					EmailVerificationService.hash("wrong-token")))
+					.willReturn(Optional.empty());
+
+			assertThatThrownBy(() -> authService.signUp(dto))
+					.isInstanceOf(EmailVerificationException.class);
+
+			then(checkUserUniquenessPort).shouldHaveNoInteractions();
+			then(signUpTransactionPort).shouldHaveNoInteractions();
 		}
 	}
 

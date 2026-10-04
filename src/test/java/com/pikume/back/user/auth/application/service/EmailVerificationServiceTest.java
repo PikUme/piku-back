@@ -7,6 +7,9 @@ import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
 
+import java.time.LocalDateTime;
+import java.util.Optional;
+
 import com.pikume.back.user.auth.application.exception.EmailVerificationException;
 import com.pikume.back.user.auth.application.exception.EmailVerificationFailure;
 import com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase;
@@ -38,9 +41,10 @@ class EmailVerificationServiceTest {
 				.willReturn(true);
 		given(store.activate(org.mockito.ArgumentMatchers.eq(EmailVerificationService.hash("user@example.com")),
 				org.mockito.ArgumentMatchers.anyString()))
-				.willReturn(true);
+				.willReturn(Optional.of(LocalDateTime.now().plusMinutes(5)));
 
-		service.sendSignUpVerificationEmail("user@example.com");
+		assertThat(service.sendSignUpVerificationEmail("user@example.com"))
+				.isAfter(LocalDateTime.now().plusMinutes(4));
 
 		then(store).should().activate(org.mockito.ArgumentMatchers.eq(EmailVerificationService.hash("user@example.com")),
 				org.mockito.ArgumentMatchers.anyString());
@@ -66,15 +70,24 @@ class EmailVerificationServiceTest {
 	}
 
 	@Test
-	void verificationReturnsAnEmailBasedProofAndDoesNotIssuePublicToken() {
+	void verificationReturnsPublicTokenAndExpiryWhilePersistingOnlyItsHash() {
 		given(allowedEmails.isEmailAllowed("user@example.com")).willReturn(true);
-		given(store.verify(EmailVerificationService.hash("user@example.com"), EmailVerificationService.hash("123456")))
-				.willReturn(EmailVerificationStorePort.VerificationResult.VERIFIED);
+		given(store.verify(org.mockito.ArgumentMatchers.eq(EmailVerificationService.hash("user@example.com")),
+				org.mockito.ArgumentMatchers.eq(EmailVerificationService.hash("123456")),
+				org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString()))
+				.willAnswer(invocation -> new EmailVerificationStorePort.VerificationResult(
+						EmailVerificationStorePort.VerificationStatus.VERIFIED,
+						new com.pikume.back.user.auth.application.dto.SignupEmailProof(
+								invocation.getArgument(2), invocation.getArgument(3), LocalDateTime.now().plusMinutes(10))));
 
-		service.verifySignUpVerificationCode("user@example.com", "123456");
+		var verification = service.verifySignUpVerificationCode("user@example.com", "123456");
+		assertThat(verification.token()).isNotBlank();
+		assertThat(verification.expiresAt()).isAfter(LocalDateTime.now().plusMinutes(9));
 
-		then(store).should().verify(EmailVerificationService.hash("user@example.com"),
-				EmailVerificationService.hash("123456"));
+		then(store).should().verify(org.mockito.ArgumentMatchers.eq(EmailVerificationService.hash("user@example.com")),
+				org.mockito.ArgumentMatchers.eq(EmailVerificationService.hash("123456")),
+				org.mockito.ArgumentMatchers.anyString(),
+				org.mockito.ArgumentMatchers.eq(EmailVerificationService.hash(verification.token())));
 		then(emailSender).shouldHaveNoInteractions();
 	}
 
