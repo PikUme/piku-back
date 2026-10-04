@@ -22,6 +22,7 @@ public class RedisEmailVerificationAdapter implements EmailVerificationStorePort
 			redis.call('HSET', KEYS[1], 'generation', ARGV[1], 'codeHash', ARGV[2],
 				'active', '0', 'deadline', now + 300000)
 			redis.call('EXPIRE', KEYS[1], 300)
+			redis.call('DEL', KEYS[2])
 			return 1
 			""", Long.class);
 	private static final DefaultRedisScript<String> ACTIVATE = script("""
@@ -75,7 +76,7 @@ public class RedisEmailVerificationAdapter implements EmailVerificationStorePort
 
 	@Override
 	public boolean reserve(String emailKey, String generation, String codeHash) {
-		return execute(RESERVE, emailKey, List.of(":auth"), "code_reserve", generation, codeHash) == 1L;
+		return execute(RESERVE, emailKey, List.of(":auth", ":proof"), "code_reserve", generation, codeHash) == 1L;
 	}
 
 	@Override

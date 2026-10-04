@@ -64,6 +64,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Import({UserPersistenceAdapter.class, UserAccountPersistenceAdapter.class, SignUpTransactionAdapter.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class SignUpRedisMySqlIntegrationTest {
+
 	private static final String SIGNUP_TOKEN = "integration-signup-token";
 
 	@Container

@@ -1,9 +1,13 @@
 package com.pikume.back.user.auth.adapter.out.cache;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.pikume.back.user.auth.application.dto.SignupEmailProof;
+import com.pikume.back.user.auth.application.exception.EmailVerificationException;
+import com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase;
 import com.pikume.back.user.auth.application.port.out.EmailVerificationStorePort.VerificationStatus;
+import com.pikume.back.user.auth.application.port.out.IssueVerificationEmailPort;
 import com.pikume.back.user.auth.application.service.EmailVerificationService;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
@@ -14,6 +18,9 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
+import org.mockito.BDDMockito;
+import org.mockito.Mockito;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -23,6 +30,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Testcontainers
 class RedisEmailVerificationAdapterIntegrationTest {
+
 	private static final String TOKEN_HASH = EmailVerificationService.hash("signup-token");
 
 	private static final DefaultRedisScript<Long> REDIS_TIME_MILLIS = new DefaultRedisScript<>(
@@ -71,8 +79,50 @@ class RedisEmailVerificationAdapterIntegrationTest {
 
 		SignupEmailProof proof = adapter.loadProof(emailKey, TOKEN_HASH).orElseThrow();
 		assertThat(adapter.loadProof(emailKey, EmailVerificationService.hash("wrong-token"))).isEmpty();
+		assertThat(adapter.loadProof(EmailVerificationService.hash("different@example.com"), TOKEN_HASH)).isEmpty();
 		assertThat(proof.expiresAt()).isBetween(kstDateTime(redisNow + 599_000), kstDateTime(redisNow + 601_000));
 		assertThat(redis.getExpire(key(emailKey, ":proof"))).isBetween(599L, 600L);
+	}
+
+	@Test
+	void acceptedResendInvalidatesThePreviouslyIssuedTokenBeforeDeliveryCompletes() {
+		String emailKey = EmailVerificationService.hash("resend@example.com");
+		verifyCode(emailKey, "111111", "verified-generation");
+		assertThat(adapter.loadProof(emailKey, TOKEN_HASH)).isPresent();
+
+		assertThat(adapter.reserve(emailKey, "replacement-generation", EmailVerificationService.hash("222222")))
+				.isTrue();
+
+		assertThat(adapter.loadProof(emailKey, TOKEN_HASH)).isEmpty();
+	}
+
+	@Test
+	void failedSmtpAfterAcceptedResendLeavesTheOldTokenInvalidated() {
+		String email = "smtp-failure-resend@example.com";
+		String emailKey = EmailVerificationService.hash(email);
+		verifyCode(emailKey, "111111", "verified-generation");
+		QueryAllowedEmailUseCase allowedEmails = Mockito.mock(QueryAllowedEmailUseCase.class);
+		BDDMockito.given(allowedEmails.isEmailAllowed(email)).willReturn(true);
+		IssueVerificationEmailPort emailSender = Mockito.mock(IssueVerificationEmailPort.class);
+		BDDMockito.willThrow(new IllegalStateException("SMTP unavailable"))
+				.given(emailSender).deliverVerificationCode(ArgumentMatchers.eq(email), ArgumentMatchers.anyString());
+		EmailVerificationService service = new EmailVerificationService(adapter, emailSender, allowedEmails);
+
+		assertThatThrownBy(() -> service.sendSignUpVerificationEmail(email))
+				.isInstanceOf(EmailVerificationException.class);
+
+		assertThat(adapter.loadProof(emailKey, TOKEN_HASH)).isEmpty();
+	}
+
+	@Test
+	void expiredTokenProofIsRemovedAndCannotBeLoaded() {
+		String emailKey = EmailVerificationService.hash("expired-proof@example.com");
+		verifyCode(emailKey, "123456", "generation");
+		String proofKey = key(emailKey, ":proof");
+		redis.opsForHash().put(proofKey, "expiresAt", "1");
+
+		assertThat(adapter.loadProof(emailKey, TOKEN_HASH)).isEmpty();
+		assertThat(redis.hasKey(proofKey)).isFalse();
 	}
 
 	@Test
