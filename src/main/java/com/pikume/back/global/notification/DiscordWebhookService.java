@@ -1,7 +1,7 @@
 package com.pikume.back.global.notification;
 
 import jakarta.servlet.http.HttpServletRequest;
-import lombok.RequiredArgsConstructor;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
@@ -12,33 +12,76 @@ import com.pikume.back.global.notification.dto.DiscordMessage;
 import com.pikume.back.global.notification.dto.EmbedField;
 
 import java.awt.Color;
+import java.net.URI;
+import java.time.Duration;
 import java.util.List;
 
 @Slf4j
 @Service
 @Profile("prod")
-@RequiredArgsConstructor
 public class DiscordWebhookService {
 
-    @Value("${discord.webhook.url}")
-    private String webhookUrl;
+    private static final String NOTIFICATION_METRIC = "discord.webhook.notifications";
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(5);
 
+    private final String webhookUrl;
     private final WebClient.Builder webClientBuilder;
+    private final MeterRegistry meterRegistry;
+
+    public DiscordWebhookService(
+            WebClient.Builder webClientBuilder,
+            MeterRegistry meterRegistry,
+            @Value("${discord.webhook.url:}") String webhookUrl) {
+        this.webClientBuilder = webClientBuilder;
+        this.meterRegistry = meterRegistry;
+        this.webhookUrl = validateWebhookUrl(webhookUrl);
+    }
 
     public void sendExceptionNotification(Exception e, HttpServletRequest request) {
-        log.debug("event=exception_notification outcome=started");
-        DiscordMessage discordMessage = getDiscordMessage(e, request);
+        try {
+            DiscordMessage discordMessage = getDiscordMessage(e, request);
 
-        webClientBuilder.build()
-            .post()
-            .uri(webhookUrl)
-            .bodyValue(discordMessage)
-            .retrieve()
-            .bodyToMono(Void.class)
-            .doOnSuccess(v -> log.debug("event=exception_notification outcome=success"))
-            .doOnError(error -> log.error("event=exception_notification outcome=failed exception={}",
-                    error.getClass().getSimpleName()))
-            .subscribe();
+            webClientBuilder.build()
+                .post()
+                .uri(webhookUrl)
+                .bodyValue(discordMessage)
+                .retrieve()
+                .bodyToMono(Void.class)
+                .timeout(REQUEST_TIMEOUT)
+                .subscribe(
+                        ignored -> { },
+                        this::recordFailure,
+                        this::recordSuccess);
+        } catch (RuntimeException failure) {
+            recordFailure(failure);
+        }
+    }
+
+    private String validateWebhookUrl(String configuredUrl) {
+        if (configuredUrl == null || configuredUrl.isBlank()) {
+            throw new IllegalStateException("discord.webhook.url must be configured in the prod profile");
+        }
+
+        try {
+            URI uri = URI.create(configuredUrl);
+            if (!uri.isAbsolute() || !"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null) {
+                throw new IllegalStateException("discord.webhook.url must be an absolute HTTPS URL");
+            }
+        } catch (IllegalArgumentException invalidUrl) {
+            throw new IllegalStateException("discord.webhook.url must be a valid HTTPS URL");
+        }
+        return configuredUrl;
+    }
+
+    private void recordSuccess() {
+        meterRegistry.counter(NOTIFICATION_METRIC, "outcome", "success").increment();
+        log.debug("event=exception_notification outcome=success");
+    }
+
+    private void recordFailure(Throwable failure) {
+        meterRegistry.counter(NOTIFICATION_METRIC, "outcome", "failure").increment();
+        log.error("event=exception_notification outcome=failed exception={}",
+                failure.getClass().getSimpleName());
     }
 
     private static DiscordMessage getDiscordMessage(Exception e, HttpServletRequest request) {
