@@ -27,6 +27,12 @@ public class SmtpEmailAdapter implements IssueVerificationEmailPort {
 	@Override
 	public String issueVerificationEmail(String email) {
 		String code = createVerificationCode();
+		deliverVerificationCode(email, code);
+		return code;
+	}
+
+	@Override
+	public void deliverVerificationCode(String email, String code) {
 		String subject = "[PikUme] 이메일 인증";
 
 		try {
@@ -47,7 +53,6 @@ public class SmtpEmailAdapter implements IssueVerificationEmailPort {
 			throw new AuthException(AuthErrorCode.EMAIL_SEND_FAILURE);
 		}
 
-		return code;
 	}
 
 	private String createVerificationCode() {

@@ -6,7 +6,7 @@ import com.pikume.back.user.application.port.out.RecordUserAccountPort;
 import com.pikume.back.user.auth.application.dto.ResetPasswordCommand;
 import com.pikume.back.user.auth.application.dto.SignUpCommand;
 import com.pikume.back.user.auth.application.dto.VerifyEmailCommand;
-import com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase;
+import com.pikume.back.user.auth.application.dto.SignupEmailProof;
 import com.pikume.back.user.auth.application.port.in.ResetPasswordUseCase;
 import com.pikume.back.user.auth.application.port.in.SignUpUseCase;
 import com.pikume.back.user.auth.application.port.in.VerifyEmailUseCase;
@@ -17,12 +17,17 @@ import com.pikume.back.user.auth.application.port.out.PasswordProtectionPort;
 import com.pikume.back.user.auth.application.port.out.ManageVerificationPort;
 import com.pikume.back.user.auth.application.port.out.RecordCompletedEmailVerificationPort;
 import com.pikume.back.user.auth.application.port.out.IssueVerificationEmailPort;
+import com.pikume.back.user.auth.application.port.out.EmailVerificationStorePort;
+import com.pikume.back.user.auth.application.port.out.EmailVerificationOperationsAlertPort;
+import com.pikume.back.user.auth.application.port.out.SignUpTransactionPort;
 import com.pikume.back.user.auth.domain.Verification;
 import com.pikume.back.user.auth.domain.VerifiedEmail;
 import com.pikume.back.user.auth.domain.service.EmailVerificationPolicy;
 import com.pikume.back.user.auth.domain.vo.VerificationType;
 import com.pikume.back.user.auth.application.exception.AuthErrorCode;
 import com.pikume.back.user.auth.application.exception.AuthException;
+import com.pikume.back.user.auth.application.exception.EmailVerificationException;
+import com.pikume.back.user.auth.application.exception.EmailVerificationFailure;
 import com.pikume.back.user.domain.User;
 import com.pikume.back.user.domain.exception.EmailAlreadyExistsException;
 import com.pikume.back.user.domain.exception.InvalidEmailException;
@@ -37,6 +42,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Locale;
 
 @Service
 @Slf4j
@@ -53,12 +59,13 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 	private final IssueVerificationEmailPort issueVerificationEmailPort;
 	private final PasswordProtectionPort passwordProtectionPort;
 	private final CheckSignUpCharacterSelectionPort checkSignUpCharacterSelectionPort;
-	private final QueryAllowedEmailUseCase queryAllowedEmailUseCase;
 	private final EmailVerificationPolicy emailVerificationPolicy;
 	private final PasswordPolicy passwordPolicy;
+	private final EmailVerificationStorePort emailVerificationStorePort;
+	private final EmailVerificationOperationsAlertPort verificationAlerts;
+	private final SignUpTransactionPort signUpTransactionPort;
 
 	@Override
-	@Transactional
 	public void signUp(SignUpCommand command) {
 		Nickname nickname = new Nickname(command.nickname());
 		requireValidEmail(command.email());
@@ -67,7 +74,9 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 			throw new AuthException(AuthErrorCode.EMAIL_ALREADY_EXISTS);
 		}
 
-		VerifiedEmail verified = getValidVerifiedEmail(command.email(), VerificationType.SIGN_UP);
+		String normalizedEmail = command.email().toLowerCase(Locale.ROOT);
+		SignupEmailProof proof = emailVerificationStorePort.loadProof(EmailVerificationService.hash(normalizedEmail))
+				.orElseThrow(() -> new EmailVerificationException(EmailVerificationFailure.VERIFICATION_INVALID));
 		requireSelectableFixedCharacter(command.fixedCharacterId());
 		User user = new User(
 				command.email(),
@@ -75,29 +84,28 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 				nickname,
 				command.fixedCharacterId());
 
-		verified.markUsed();
-		recordCompletedEmailVerificationPort.recordCompletedVerification(verified);
 		try {
-			recordUserAccountPort.recordUserAccount(user);
+			user = signUpTransactionPort.register(user);
 		} catch (EmailAlreadyExistsException exception) {
 			throw new AuthException(AuthErrorCode.EMAIL_ALREADY_EXISTS);
 		} catch (NicknameAlreadyExistsException exception) {
 			throw new AuthException(AuthErrorCode.NICKNAME_ALREADY_EXISTS);
 		}
+		try {
+			emailVerificationStorePort.removeProofIfVersionMatches(
+					EmailVerificationService.hash(normalizedEmail), proof.version());
+		} catch (RuntimeException exception) {
+			String errorType = exception.getClass().getSimpleName();
+			log.error("event=signup_verification_cleanup outcome=failed userId={} errorType={}",
+					user.getId(), errorType);
+			try {
+				verificationAlerts.signupProofCleanupFailed(errorType);
+			} catch (RuntimeException alertException) {
+				log.error("event=signup_verification_alert outcome=failed errorType={}",
+						alertException.getClass().getSimpleName());
+			}
+		}
 		log.info("event=user_signup outcome=success userId={}", user.getId());
-	}
-
-	@Override
-	@Transactional
-	public void sendSignUpVerificationEmail(String email) {
-		requireValidEmail(email);
-		if (!queryAllowedEmailUseCase.isEmailAllowed(email)) {
-			throw new AuthException(AuthErrorCode.INVALID_EMAIL);
-		}
-		if (checkUserUniquenessPort.isEmailRegistered(email)) {
-			log.info("event=verification_request outcome=accepted reason=email_already_registered");
-		}
-		saveVerificationCode(email, issueVerificationEmailPort.issueVerificationEmail(email), VerificationType.SIGN_UP);
 	}
 
 	@Override
@@ -116,6 +124,9 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 	@Override
 	@Transactional
 	public void verifyCode(VerifyEmailCommand command) {
+		if (command.type() != VerificationType.PASSWORD_RESET) {
+			throw new AuthException(AuthErrorCode.VERIFICATION_NOT_FOUND);
+		}
 		requireValidEmail(command.email());
 		Verification verification = loadVerificationPort.loadVerification(command.email(), command.type())
 				.orElseThrow(() -> new AuthException(AuthErrorCode.VERIFICATION_NOT_FOUND));

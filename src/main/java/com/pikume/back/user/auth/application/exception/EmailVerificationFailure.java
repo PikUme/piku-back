@@ -1,0 +1,11 @@
+package com.pikume.back.user.auth.application.exception;
+
+public enum EmailVerificationFailure {
+	INVALID_EMAIL,
+	VERIFICATION_INVALID,
+	CODE_EXPIRED,
+	CODE_MISMATCH,
+	EMAIL_SEND_FAILED,
+	VERIFICATION_UNAVAILABLE,
+	EMAIL_ALREADY_EXISTS
+}

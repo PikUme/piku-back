@@ -1,7 +1,10 @@
 package com.pikume.back.global.notification;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import com.pikume.back.global.notification.dto.OperationalAlert;
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
@@ -11,6 +14,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.reactive.function.client.ClientResponse;
+import org.springframework.web.reactive.function.client.ClientRequest;
 import org.springframework.web.reactive.function.client.ExchangeFunction;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
@@ -36,6 +40,27 @@ class DiscordWebhookServiceTest {
 
 		service.sendExceptionNotification(new IllegalStateException("sensitive message"), request());
 
+		assertThat(notificationCount(meterRegistry, "success")).isEqualTo(1);
+		assertThat(notificationCount(meterRegistry, "failure")).isZero();
+	}
+
+	@Test
+	@DisplayName("운영 알림도 기존 Discord 전송 파이프라인으로 전달한다")
+	void sendsOperationalAlertThroughSharedPipeline() {
+		SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+		AtomicReference<ClientRequest> sentRequest = new AtomicReference<>();
+		WebClient.Builder webClientBuilder = builderFor(request -> {
+			sentRequest.set(request);
+			return Mono.just(ClientResponse.create(HttpStatus.NO_CONTENT).build());
+		});
+		DiscordWebhookService service = new DiscordWebhookService(webClientBuilder, meterRegistry, WEBHOOK_URL);
+
+		service.sendOperationalAlert(new OperationalAlert(
+				"가입 인증 Redis 장애", "prod", LocalDateTime.of(2026, 10, 4, 9, 0),
+				"/api/auth/signup", "POST", "proof_load", "RedisConnectionFailure", 503));
+
+		assertThat(sentRequest.get().url().toString()).isEqualTo(WEBHOOK_URL);
+		assertThat(sentRequest.get().method().name()).isEqualTo("POST");
 		assertThat(notificationCount(meterRegistry, "success")).isEqualTo(1);
 		assertThat(notificationCount(meterRegistry, "failure")).isZero();
 	}
