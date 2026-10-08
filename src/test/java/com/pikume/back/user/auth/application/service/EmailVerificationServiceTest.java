@@ -7,13 +7,18 @@ import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
 
+import com.pikume.back.user.auth.application.dto.SignupEmailProof;
 import com.pikume.back.user.auth.application.exception.EmailVerificationException;
 import com.pikume.back.user.auth.application.exception.EmailVerificationFailure;
 import com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase;
 import com.pikume.back.user.auth.application.port.out.EmailVerificationStorePort;
 import com.pikume.back.user.auth.application.port.out.IssueVerificationEmailPort;
+import java.time.LocalDateTime;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
+import org.mockito.BDDMockito;
 
 class EmailVerificationServiceTest {
 
@@ -33,48 +38,58 @@ class EmailVerificationServiceTest {
 	@Test
 	void sendActivatesOnlyTheGenerationWhoseEmailWasDelivered() {
 		given(allowedEmails.isEmailAllowed("user@example.com")).willReturn(true);
-		given(store.reserve(org.mockito.ArgumentMatchers.eq(EmailVerificationService.hash("user@example.com")),
-				org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString()))
+		given(store.reserve(ArgumentMatchers.eq(EmailVerificationService.hash("user@example.com")),
+				ArgumentMatchers.anyString(), ArgumentMatchers.anyString()))
 				.willReturn(true);
-		given(store.activate(org.mockito.ArgumentMatchers.eq(EmailVerificationService.hash("user@example.com")),
-				org.mockito.ArgumentMatchers.anyString()))
-				.willReturn(true);
+		given(store.activate(ArgumentMatchers.eq(EmailVerificationService.hash("user@example.com")),
+				ArgumentMatchers.anyString()))
+				.willReturn(Optional.of(LocalDateTime.now().plusMinutes(5)));
 
-		service.sendSignUpVerificationEmail("user@example.com");
+		assertThat(service.sendSignUpVerificationEmail("user@example.com"))
+				.isAfter(LocalDateTime.now().plusMinutes(4));
 
-		then(store).should().activate(org.mockito.ArgumentMatchers.eq(EmailVerificationService.hash("user@example.com")),
-				org.mockito.ArgumentMatchers.anyString());
-		then(emailSender).should().deliverVerificationCode(org.mockito.ArgumentMatchers.eq("user@example.com"),
-				org.mockito.ArgumentMatchers.matches("\\d{6}"));
+		then(store).should().activate(ArgumentMatchers.eq(EmailVerificationService.hash("user@example.com")),
+				ArgumentMatchers.anyString());
+		then(emailSender).should().deliverVerificationCode(ArgumentMatchers.eq("user@example.com"),
+				ArgumentMatchers.matches("\\d{6}"));
 	}
 
 	@Test
 	void failedDeliveryDoesNotActivateTheReservedCode() {
 		given(allowedEmails.isEmailAllowed("user@example.com")).willReturn(true);
-		given(store.reserve(org.mockito.ArgumentMatchers.eq(EmailVerificationService.hash("user@example.com")),
-				org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString()))
+		given(store.reserve(ArgumentMatchers.eq(EmailVerificationService.hash("user@example.com")),
+				ArgumentMatchers.anyString(), ArgumentMatchers.anyString()))
 				.willReturn(true);
-		org.mockito.BDDMockito.willThrow(new EmailVerificationException(EmailVerificationFailure.EMAIL_SEND_FAILED))
-				.given(emailSender).deliverVerificationCode(org.mockito.ArgumentMatchers.eq("user@example.com"),
-						org.mockito.ArgumentMatchers.anyString());
+		BDDMockito.willThrow(new EmailVerificationException(EmailVerificationFailure.EMAIL_SEND_FAILED))
+				.given(emailSender).deliverVerificationCode(ArgumentMatchers.eq("user@example.com"),
+						ArgumentMatchers.anyString());
 
 		assertThatThrownBy(() -> service.sendSignUpVerificationEmail("user@example.com"))
 				.isInstanceOf(EmailVerificationException.class);
 
-		then(store).should(never()).activate(org.mockito.ArgumentMatchers.eq(EmailVerificationService.hash("user@example.com")),
-				org.mockito.ArgumentMatchers.anyString());
+		then(store).should(never()).activate(ArgumentMatchers.eq(EmailVerificationService.hash("user@example.com")),
+				ArgumentMatchers.anyString());
 	}
 
 	@Test
-	void verificationReturnsAnEmailBasedProofAndDoesNotIssuePublicToken() {
+	void verificationReturnsPublicTokenAndExpiryWhilePersistingOnlyItsHash() {
 		given(allowedEmails.isEmailAllowed("user@example.com")).willReturn(true);
-		given(store.verify(EmailVerificationService.hash("user@example.com"), EmailVerificationService.hash("123456")))
-				.willReturn(EmailVerificationStorePort.VerificationResult.VERIFIED);
+		given(store.verify(ArgumentMatchers.eq(EmailVerificationService.hash("user@example.com")),
+				ArgumentMatchers.eq(EmailVerificationService.hash("123456")),
+				ArgumentMatchers.anyString(), ArgumentMatchers.anyString()))
+				.willAnswer(invocation -> new EmailVerificationStorePort.VerificationResult(
+						EmailVerificationStorePort.VerificationStatus.VERIFIED,
+						new SignupEmailProof(
+								invocation.getArgument(2), invocation.getArgument(3), LocalDateTime.now().plusMinutes(10))));
 
-		service.verifySignUpVerificationCode("user@example.com", "123456");
+		var verification = service.verifySignUpVerificationCode("user@example.com", "123456");
+		assertThat(verification.token()).isNotBlank();
+		assertThat(verification.expiresAt()).isAfter(LocalDateTime.now().plusMinutes(9));
 
-		then(store).should().verify(EmailVerificationService.hash("user@example.com"),
-				EmailVerificationService.hash("123456"));
+		then(store).should().verify(ArgumentMatchers.eq(EmailVerificationService.hash("user@example.com")),
+				ArgumentMatchers.eq(EmailVerificationService.hash("123456")),
+				ArgumentMatchers.anyString(),
+				ArgumentMatchers.eq(EmailVerificationService.hash(verification.token())));
 		then(emailSender).shouldHaveNoInteractions();
 	}
 

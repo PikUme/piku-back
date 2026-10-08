@@ -73,6 +73,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @DisplayName("닉네임 Web 계약")
 class NicknameWebContractTest {
+	private static final String SIGNUP_TOKEN = "signup-proof-token";
 
 	private static final String USER_ID = "user-1";
 	private static final String VALIDATION_TYPE =
@@ -159,7 +160,7 @@ class NicknameWebContractTest {
 			mockMvc.perform(post("/api/auth/signup")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
-								{"email":"user@example.com","password":"abc@123","nickname":" 12345678901234567890 ","fixedCharacterId":1}
+								{"email":"user@example.com","password":"abc@123","nickname":" 12345678901234567890 ","fixedCharacterId":1,"emailVerificationToken":"signup-proof-token"}
 								"""))
 					.andExpect(status().isCreated())
 					.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
@@ -175,7 +176,7 @@ class NicknameWebContractTest {
 			ResultActions result = mockMvc.perform(post("/api/auth/signup")
 					.contentType(MediaType.APPLICATION_JSON)
 					.content("""
-							{"email":"user@example.com","password":"abc@123","nickname":"%s","fixedCharacterId":1}
+							{"email":"user@example.com","password":"abc@123","nickname":"%s","fixedCharacterId":1,"emailVerificationToken":"signup-proof-token"}
 							""".formatted(nickname)));
 
 			assertValidationProblem(result, detail, "/api/auth/signup");
@@ -187,7 +188,7 @@ class NicknameWebContractTest {
 			ResultActions result = mockMvc.perform(post("/api/auth/signup")
 					.contentType(MediaType.APPLICATION_JSON)
 					.content("""
-							{"email":"user@example.com","password":"abc@123","fixedCharacterId":1}
+							{"email":"user@example.com","password":"abc@123","fixedCharacterId":1,"emailVerificationToken":"signup-proof-token"}
 							"""));
 
 			assertValidationProblem(result, "닉네임은 필수 값입니다.", "/api/auth/signup");
@@ -202,7 +203,7 @@ class NicknameWebContractTest {
 			mockMvc.perform(post("/api/auth/signup")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
-								{"email":"user@example.com","password":"abc@123","nickname":" 중복닉 ","fixedCharacterId":1}
+								{"email":"user@example.com","password":"abc@123","nickname":" 중복닉 ","fixedCharacterId":1,"emailVerificationToken":"signup-proof-token"}
 								"""))
 					.andExpect(status().isConflict())
 					.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
@@ -395,8 +396,10 @@ class NicknameWebContractTest {
 	}
 
 	private void prepareSignup(String email) {
-		given(emailVerificationStorePort.loadProof(EmailVerificationService.hash(email)))
-				.willReturn(Optional.of(new SignupEmailProof("proof-version", LocalDateTime.now().plusMinutes(10))));
+		given(emailVerificationStorePort.loadProof(EmailVerificationService.hash(email),
+				EmailVerificationService.hash(SIGNUP_TOKEN)))
+				.willReturn(Optional.of(new SignupEmailProof("proof-version",
+						EmailVerificationService.hash(SIGNUP_TOKEN), LocalDateTime.now().plusMinutes(10))));
 		given(checkSignUpCharacterSelectionPort.isSelectableFixedCharacter(1L)).willReturn(true);
 		given(passwordProtectionPort.protect("abc@123")).willReturn("encoded-password");
 	}

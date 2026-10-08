@@ -19,10 +19,13 @@ import com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase;
 import com.pikume.back.user.auth.application.dto.SignUpCommand;
 import com.pikume.back.user.auth.application.dto.VerifyEmailCommand;
 import com.pikume.back.user.auth.application.dto.ResetPasswordCommand;
+import com.pikume.back.user.auth.application.dto.SignupEmailVerification;
 import com.pikume.back.user.auth.adapter.in.web.dto.request.EmailValidRequest;
 import com.pikume.back.user.auth.adapter.in.web.dto.request.PwdResetRequest;
 import com.pikume.back.user.auth.adapter.in.web.dto.request.SignupRequest;
 import com.pikume.back.user.auth.adapter.in.web.dto.request.VerificationEmailRequest;
+import com.pikume.back.user.auth.adapter.in.web.dto.response.SignupEmailVerificationResponse;
+import com.pikume.back.user.auth.adapter.in.web.dto.response.SignupVerificationEmailResponse;
 
 import java.util.List;
 import java.util.Map;
@@ -47,7 +50,8 @@ public class AuthController {
 	@PostMapping("/signup")
 	public ResponseEntity<?> signup(@Valid @RequestBody SignupRequest dto) {
 		signUpUseCase.signUp(new SignUpCommand(
-				dto.getEmail(), dto.getPassword(), dto.getNickname(), dto.getFixedCharacterId()));
+				dto.getEmail(), dto.getPassword(), dto.getNickname(), dto.getFixedCharacterId(),
+				dto.getEmailVerificationToken()));
 		return ResponseEntity.status(HttpStatus.CREATED).body(new MessageResponse("회원가입 성공"));
 	}
 
@@ -59,8 +63,9 @@ public class AuthController {
 	})
 	@PostMapping("/send-verification/sign-up")
 	public ResponseEntity<?> sendSignUpVerificationEmail(@Valid @RequestBody VerificationEmailRequest request) {
-		emailVerificationUseCase.sendSignUpVerificationEmail(request.email());
-		return ResponseEntity.ok(new MessageResponse("회원가입 인증 이메일이 발송되었습니다."));
+		return ResponseEntity.ok(new SignupVerificationEmailResponse(
+				"회원가입 인증 이메일이 발송되었습니다.",
+				emailVerificationUseCase.sendSignUpVerificationEmail(request.email())));
 	}
 
 	@Operation(summary = "비밀번호 재설정 이메일 발송", description = "비밀번호 재설정을 위한 인증코드를 이메일로 발송합니다.")
@@ -83,7 +88,10 @@ public class AuthController {
 	@PostMapping("/verify-code")
 	public ResponseEntity<?> verifyCode(@Valid @RequestBody EmailValidRequest dto) {
 		if (dto.getType() == VerificationType.SIGN_UP) {
-			emailVerificationUseCase.verifySignUpVerificationCode(dto.getEmail(), dto.getCode());
+			SignupEmailVerification verification = emailVerificationUseCase.verifySignUpVerificationCode(
+					dto.getEmail(), dto.getCode());
+			return ResponseEntity.ok(new SignupEmailVerificationResponse(
+					"이메일 인증이 완료되었습니다.", verification.token(), verification.expiresAt()));
 		} else {
 			verifyEmailUseCase.verifyCode(new VerifyEmailCommand(dto.getEmail(), dto.getCode(), dto.getType()));
 		}

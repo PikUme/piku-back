@@ -2,6 +2,7 @@ package com.pikume.back.user.auth.application.service;
 
 import com.pikume.back.user.auth.application.exception.EmailVerificationException;
 import com.pikume.back.user.auth.application.exception.EmailVerificationFailure;
+import com.pikume.back.user.auth.application.dto.SignupEmailVerification;
 import com.pikume.back.user.auth.application.port.in.EmailVerificationUseCase;
 import com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase;
 import com.pikume.back.user.auth.application.port.out.EmailVerificationStorePort;
@@ -15,6 +16,7 @@ import java.security.SecureRandom;
 import java.util.HexFormat;
 import java.util.Locale;
 import java.util.UUID;
+import java.time.LocalDateTime;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -34,7 +36,7 @@ public class EmailVerificationService implements EmailVerificationUseCase {
 	}
 
 	@Override
-	public void sendSignUpVerificationEmail(String rawEmail) {
+	public LocalDateTime sendSignUpVerificationEmail(String rawEmail) {
 		String email = validEmail(rawEmail);
 		String emailKey = hash(email);
 		String code = createVerificationCode();
@@ -47,23 +49,24 @@ public class EmailVerificationService implements EmailVerificationUseCase {
 		} catch (RuntimeException exception) {
 			throw new EmailVerificationException(EmailVerificationFailure.EMAIL_SEND_FAILED, exception, null);
 		}
-		if (!store.activate(emailKey, generation)) {
-			throw new EmailVerificationException(EmailVerificationFailure.VERIFICATION_INVALID);
-		}
+		return store.activate(emailKey, generation)
+				.orElseThrow(() -> new EmailVerificationException(EmailVerificationFailure.VERIFICATION_INVALID));
 	}
 
 	@Override
-	public void verifySignUpVerificationCode(String rawEmail, String code) {
+	public SignupEmailVerification verifySignUpVerificationCode(String rawEmail, String code) {
 		String email = validEmail(rawEmail);
-		EmailVerificationStorePort.VerificationResult result =
-				store.verify(hash(email), hash(code == null ? "" : code));
-		switch (result) {
-			case VERIFIED -> { }
+		String token = UUID.randomUUID().toString();
+		EmailVerificationStorePort.VerificationResult result = store.verify(
+				hash(email), hash(code == null ? "" : code), UUID.randomUUID().toString(), hash(token));
+		switch (result.status()) {
+			case VERIFIED -> { return new SignupEmailVerification(token, result.proof().expiresAt()); }
 			case NOT_FOUND, INACTIVE -> throw new EmailVerificationException(
 					EmailVerificationFailure.VERIFICATION_INVALID);
 			case EXPIRED -> throw new EmailVerificationException(EmailVerificationFailure.CODE_EXPIRED);
 			case MISMATCH -> throw new EmailVerificationException(EmailVerificationFailure.CODE_MISMATCH);
 		}
+		throw new IllegalStateException("Unhandled signup email verification result");
 	}
 
 	private String validEmail(String rawEmail) {

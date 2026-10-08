@@ -70,13 +70,18 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 		Nickname nickname = new Nickname(command.nickname());
 		requireValidEmail(command.email());
 		requireValidPassword(command.password());
-		if (checkUserUniquenessPort.isEmailRegistered(command.email())) {
-			throw new AuthException(AuthErrorCode.EMAIL_ALREADY_EXISTS);
+		if (command.emailVerificationToken() == null || command.emailVerificationToken().isBlank()) {
+			throw new EmailVerificationException(EmailVerificationFailure.VERIFICATION_INVALID);
 		}
 
 		String normalizedEmail = command.email().toLowerCase(Locale.ROOT);
-		SignupEmailProof proof = emailVerificationStorePort.loadProof(EmailVerificationService.hash(normalizedEmail))
+		SignupEmailProof proof = emailVerificationStorePort.loadProof(
+				EmailVerificationService.hash(normalizedEmail),
+				EmailVerificationService.hash(command.emailVerificationToken()))
 				.orElseThrow(() -> new EmailVerificationException(EmailVerificationFailure.VERIFICATION_INVALID));
+		if (checkUserUniquenessPort.isEmailRegistered(command.email())) {
+			throw new AuthException(AuthErrorCode.EMAIL_ALREADY_EXISTS);
+		}
 		requireSelectableFixedCharacter(command.fixedCharacterId());
 		User user = new User(
 				command.email(),

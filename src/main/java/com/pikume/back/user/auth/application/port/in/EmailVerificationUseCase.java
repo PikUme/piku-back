@@ -1,8 +1,11 @@
 package com.pikume.back.user.auth.application.port.in;
 
+import com.pikume.back.user.auth.application.dto.SignupEmailVerification;
+import java.time.LocalDateTime;
+
 public interface EmailVerificationUseCase {
 
-	void sendSignUpVerificationEmail(String email);
+	LocalDateTime sendSignUpVerificationEmail(String email);
 
-	void verifySignUpVerificationCode(String email, String code);
+	SignupEmailVerification verifySignUpVerificationCode(String email, String code);
 }
