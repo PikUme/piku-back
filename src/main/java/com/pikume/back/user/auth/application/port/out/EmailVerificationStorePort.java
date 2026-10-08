@@ -6,7 +6,7 @@ import java.util.Optional;
 
 public interface EmailVerificationStorePort {
 
-	boolean reserve(String emailKey, String generation, String codeHash);
+	ReservationResult reserve(String emailKey, String generation, String codeHash, String requestId);
 
 	Optional<LocalDateTime> activate(String emailKey, String generation);
 
@@ -16,7 +16,15 @@ public interface EmailVerificationStorePort {
 
 	boolean removeProofIfVersionMatches(String emailKey, String version);
 
-	record VerificationResult(VerificationStatus status, SignupEmailProof proof) {
+	record ReservationResult(ReservationStatus status, LocalDateTime expiresAt, LocalDateTime resendAvailableAt) {
+	}
+
+	record VerificationResult(VerificationStatus status, SignupEmailProof proof, LocalDateTime retryAt) {
+	}
+
+	enum ReservationStatus {
+		RESERVED,
+		RATE_LIMITED
 	}
 
 	enum VerificationStatus {
@@ -24,6 +32,7 @@ public interface EmailVerificationStorePort {
 		NOT_FOUND,
 		EXPIRED,
 		MISMATCH,
-		INACTIVE
+		INACTIVE,
+		ATTEMPTS_EXHAUSTED
 	}
 }

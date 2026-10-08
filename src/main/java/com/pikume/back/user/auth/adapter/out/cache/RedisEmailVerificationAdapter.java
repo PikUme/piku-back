@@ -16,15 +16,33 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class RedisEmailVerificationAdapter implements EmailVerificationStorePort {
 
-	private static final DefaultRedisScript<Long> RESERVE = script("""
+	private static final DefaultRedisScript<String> RESERVE = script("""
 			local time = redis.call('TIME')
 			local now = time[1] * 1000 + math.floor(time[2] / 1000)
+			redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', now - 3600000)
+			local retryAt = tonumber(redis.call('GET', KEYS[3]) or '0')
+			if redis.call('ZCARD', KEYS[2]) >= 5 then
+				local oldest = redis.call('ZRANGE', KEYS[2], 0, 0, 'WITHSCORES')
+				local hourlyRetryAt = tonumber(oldest[2]) + 3600000
+				if hourlyRetryAt > retryAt then retryAt = hourlyRetryAt end
+			end
+			if retryAt > now then return 'RATE_LIMITED|' .. retryAt end
+			local expiresAt = now + 300000
+			local resendAvailableAt = now + 60000
+			redis.call('ZADD', KEYS[2], now, ARGV[3])
+			if redis.call('ZCARD', KEYS[2]) >= 5 then
+				local oldest = redis.call('ZRANGE', KEYS[2], 0, 0, 'WITHSCORES')
+				local hourlyRetryAt = tonumber(oldest[2]) + 3600000
+				if hourlyRetryAt > resendAvailableAt then resendAvailableAt = hourlyRetryAt end
+			end
+			redis.call('EXPIRE', KEYS[2], 3600)
+			redis.call('SET', KEYS[3], now + 60000, 'PX', 60000)
 			redis.call('HSET', KEYS[1], 'generation', ARGV[1], 'codeHash', ARGV[2],
-				'active', '0', 'deadline', now + 300000)
+				'active', '0', 'deadline', expiresAt)
 			redis.call('EXPIRE', KEYS[1], 300)
-			redis.call('DEL', KEYS[2])
-			return 1
-			""", Long.class);
+			redis.call('DEL', KEYS[4], KEYS[5], KEYS[6])
+			return 'RESERVED|' .. expiresAt .. '|' .. resendAvailableAt
+			""", String.class);
 	private static final DefaultRedisScript<String> ACTIVATE = script("""
 			local time = redis.call('TIME')
 			local now = time[1] * 1000 + math.floor(time[2] / 1000)
@@ -39,15 +57,37 @@ public class RedisEmailVerificationAdapter implements EmailVerificationStorePort
 	private static final DefaultRedisScript<String> VERIFY = script("""
 			local time = redis.call('TIME')
 			local now = time[1] * 1000 + math.floor(time[2] / 1000)
+			local function resendAt()
+				redis.call('ZREMRANGEBYSCORE', KEYS[5], '-inf', now - 3600000)
+				local retryAt = tonumber(redis.call('GET', KEYS[6]) or '0')
+				if redis.call('ZCARD', KEYS[5]) >= 5 then
+					local oldest = redis.call('ZRANGE', KEYS[5], 0, 0, 'WITHSCORES')
+					local hourlyRetryAt = tonumber(oldest[2]) + 3600000
+					if hourlyRetryAt > retryAt then retryAt = hourlyRetryAt end
+				end
+				return math.max(now, retryAt)
+			end
+			local lockUntil = tonumber(redis.call('GET', KEYS[4]) or '0')
+			if lockUntil > now then return 'ATTEMPTS_EXHAUSTED|' .. resendAt() end
+			if lockUntil > 0 then redis.call('DEL', KEYS[4]) end
 			local deadline = tonumber(redis.call('HGET', KEYS[1], 'deadline') or '0')
 			if deadline == 0 then return 'NOT_FOUND' end
 			if deadline <= now then
-				redis.call('DEL', KEYS[1])
+				redis.call('DEL', KEYS[1], KEYS[3], KEYS[4])
 				return 'EXPIRED'
 			end
 			if redis.call('HGET', KEYS[1], 'active') ~= '1' then return 'INACTIVE' end
-			if redis.call('HGET', KEYS[1], 'codeHash') ~= ARGV[1] then return 'MISMATCH' end
-			redis.call('DEL', KEYS[1])
+			if redis.call('HGET', KEYS[1], 'codeHash') ~= ARGV[1] then
+				local attempts = redis.call('INCR', KEYS[3])
+				redis.call('PEXPIRE', KEYS[3], deadline - now)
+				if attempts >= 5 then
+					redis.call('DEL', KEYS[1], KEYS[3])
+					redis.call('SET', KEYS[4], deadline, 'PX', deadline - now)
+					return 'ATTEMPTS_EXHAUSTED|' .. resendAt()
+				end
+				return 'MISMATCH'
+			end
+			redis.call('DEL', KEYS[1], KEYS[3], KEYS[4])
 			redis.call('HSET', KEYS[2], 'version', ARGV[2], 'tokenHash', ARGV[3], 'expiresAt', now + 600000)
 			redis.call('EXPIRE', KEYS[2], 600)
 			return 'VERIFIED|' .. ARGV[2] .. '|' .. ARGV[3] .. '|' .. (now + 600000)
@@ -75,8 +115,17 @@ public class RedisEmailVerificationAdapter implements EmailVerificationStorePort
 	}
 
 	@Override
-	public boolean reserve(String emailKey, String generation, String codeHash) {
-		return execute(RESERVE, emailKey, List.of(":auth", ":proof"), "code_reserve", generation, codeHash) == 1L;
+	public ReservationResult reserve(String emailKey, String generation, String codeHash, String requestId) {
+		String result = execute(RESERVE, emailKey,
+				List.of(":auth", ":send-window", ":send-cooldown", ":proof", ":attempts", ":lock"),
+				"code_reserve", generation, codeHash, requestId);
+		String[] values = result.split("\\|", 3);
+		if (values[0].equals("RATE_LIMITED")) {
+			return new ReservationResult(ReservationStatus.RATE_LIMITED, null,
+					localDateTime(Long.parseLong(values[1])));
+		}
+		return new ReservationResult(ReservationStatus.RESERVED,
+				localDateTime(Long.parseLong(values[1])), localDateTime(Long.parseLong(values[2])));
 	}
 
 	@Override
@@ -87,14 +136,19 @@ public class RedisEmailVerificationAdapter implements EmailVerificationStorePort
 
 	@Override
 	public VerificationResult verify(String emailKey, String submittedCodeHash, String version, String tokenHash) {
-		String result = execute(VERIFY, emailKey, List.of(":auth", ":proof"), "code_verify",
-				submittedCodeHash, version, tokenHash);
+		String result = execute(VERIFY, emailKey,
+				List.of(":auth", ":proof", ":attempts", ":lock", ":send-window", ":send-cooldown"),
+				"code_verify", submittedCodeHash, version, tokenHash);
 		String[] values = result.split("\\|", 4);
 		if (values[0].equals("VERIFIED")) {
 			SignupEmailProof proof = new SignupEmailProof(values[1], values[2], localDateTime(Long.parseLong(values[3])));
-			return new VerificationResult(VerificationStatus.VERIFIED, proof);
+			return new VerificationResult(VerificationStatus.VERIFIED, proof, null);
 		}
-		return new VerificationResult(VerificationStatus.valueOf(values[0]), null);
+		if (values[0].equals("ATTEMPTS_EXHAUSTED")) {
+			return new VerificationResult(VerificationStatus.ATTEMPTS_EXHAUSTED, null,
+					localDateTime(Long.parseLong(values[1])));
+		}
+		return new VerificationResult(VerificationStatus.valueOf(values[0]), null, null);
 	}
 
 	@Override

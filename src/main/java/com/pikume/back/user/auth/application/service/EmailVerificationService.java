@@ -3,6 +3,7 @@ package com.pikume.back.user.auth.application.service;
 import com.pikume.back.user.auth.application.exception.EmailVerificationException;
 import com.pikume.back.user.auth.application.exception.EmailVerificationFailure;
 import com.pikume.back.user.auth.application.dto.SignupEmailVerification;
+import com.pikume.back.user.auth.application.dto.SignupVerificationSent;
 import com.pikume.back.user.auth.application.port.in.EmailVerificationUseCase;
 import com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase;
 import com.pikume.back.user.auth.application.port.out.EmailVerificationStorePort;
@@ -36,21 +37,26 @@ public class EmailVerificationService implements EmailVerificationUseCase {
 	}
 
 	@Override
-	public LocalDateTime sendSignUpVerificationEmail(String rawEmail) {
+	public SignupVerificationSent sendSignUpVerificationEmail(String rawEmail) {
 		String email = validEmail(rawEmail);
 		String emailKey = hash(email);
 		String code = createVerificationCode();
 		String generation = UUID.randomUUID().toString();
-		if (!store.reserve(emailKey, generation, hash(code))) {
-			throw new EmailVerificationException(EmailVerificationFailure.VERIFICATION_INVALID);
+		EmailVerificationStorePort.ReservationResult reservation =
+				store.reserve(emailKey, generation, hash(code), UUID.randomUUID().toString());
+		if (reservation.status() == EmailVerificationStorePort.ReservationStatus.RATE_LIMITED) {
+			throw new EmailVerificationException(EmailVerificationFailure.RATE_LIMITED,
+					reservation.resendAvailableAt());
 		}
 		try {
 			emailSender.deliverVerificationCode(email, code);
 		} catch (RuntimeException exception) {
-			throw new EmailVerificationException(EmailVerificationFailure.EMAIL_SEND_FAILED, exception, null);
+			throw new EmailVerificationException(EmailVerificationFailure.EMAIL_SEND_FAILED, exception, null,
+					reservation.resendAvailableAt());
 		}
-		return store.activate(emailKey, generation)
+		LocalDateTime expiresAt = store.activate(emailKey, generation)
 				.orElseThrow(() -> new EmailVerificationException(EmailVerificationFailure.VERIFICATION_INVALID));
+		return new SignupVerificationSent(expiresAt, reservation.resendAvailableAt());
 	}
 
 	@Override
@@ -65,6 +71,8 @@ public class EmailVerificationService implements EmailVerificationUseCase {
 					EmailVerificationFailure.VERIFICATION_INVALID);
 			case EXPIRED -> throw new EmailVerificationException(EmailVerificationFailure.CODE_EXPIRED);
 			case MISMATCH -> throw new EmailVerificationException(EmailVerificationFailure.CODE_MISMATCH);
+			case ATTEMPTS_EXHAUSTED -> throw new EmailVerificationException(
+					EmailVerificationFailure.ATTEMPTS_EXHAUSTED, result.retryAt());
 		}
 		throw new IllegalStateException("Unhandled signup email verification result");
 	}

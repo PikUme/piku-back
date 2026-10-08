@@ -23,6 +23,7 @@ import com.pikume.back.user.auth.application.port.in.EmailVerificationUseCase;
 import com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase;
 import com.pikume.back.user.auth.application.dto.ResetPasswordCommand;
 import com.pikume.back.user.auth.application.dto.SignupEmailVerification;
+import com.pikume.back.user.auth.application.dto.SignupVerificationSent;
 import com.pikume.back.user.auth.application.dto.SignUpCommand;
 import com.pikume.back.user.auth.application.dto.VerifyEmailCommand;
 import com.pikume.back.user.auth.adapter.in.web.dto.request.SignupRequest;
@@ -93,15 +94,17 @@ class AuthControllerTest {
 	@DisplayName("POST /api/auth/send-verification/sign-up은 기존 성공 메시지를 반환한다")
 	void sendSignUpVerificationEmailReturnsMessageResponse() throws Exception {
 		given(emailVerificationUseCase.sendSignUpVerificationEmail("user@example.com"))
-				.willReturn(LocalDateTime.of(2026, 10, 4, 12, 0));
+				.willReturn(new SignupVerificationSent(LocalDateTime.of(2026, 10, 4, 12, 5),
+						LocalDateTime.of(2026, 10, 4, 12, 1)));
 		mockMvc.perform(post("/api/auth/send-verification/sign-up")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"email\":\"user@example.com\"}"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.message").value("회원가입 인증 이메일이 발송되었습니다."))
-				.andExpect(jsonPath("$.expiresAt").value("2026-10-04T12:00:00"))
+				.andExpect(jsonPath("$.expiresAt").value("2026-10-04T12:05:00"))
+				.andExpect(jsonPath("$.resendAvailableAt").value("2026-10-04T12:01:00"))
 				.andExpect(jsonPath("$.emailVerificationToken").doesNotExist())
-				.andExpect(jsonPath("$.resendAvailableAt").doesNotExist());
+				.andExpect(jsonPath("$.token").doesNotExist());
 
 		then(emailVerificationUseCase).should().sendSignUpVerificationEmail("user@example.com");
 	}
@@ -110,7 +113,8 @@ class AuthControllerTest {
 	@DisplayName("POST /api/auth/send-verification/sign-up은 비어 있지 않은 이메일을 Use Case에 위임한다")
 	void sendSignUpVerificationDelegatesNonBlankEmail() throws Exception {
 		given(emailVerificationUseCase.sendSignUpVerificationEmail("not-an-email"))
-				.willReturn(LocalDateTime.now().plusMinutes(5));
+				.willReturn(new SignupVerificationSent(LocalDateTime.now().plusMinutes(5),
+						LocalDateTime.now().plusMinutes(1)));
 		mockMvc.perform(post("/api/auth/send-verification/sign-up")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"email\":\"not-an-email\"}"))

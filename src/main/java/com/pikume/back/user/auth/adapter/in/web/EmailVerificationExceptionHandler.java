@@ -10,6 +10,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.Duration;
+import java.time.format.DateTimeFormatter;
 import java.util.Locale;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -18,6 +20,7 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -31,6 +34,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 public class EmailVerificationExceptionHandler {
 
 	private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+	private static final DateTimeFormatter RETRY_AT_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
 
 	private final ProblemDetailFactory problems;
 	private final ObjectProvider<DiscordWebhookService> discord;
@@ -50,7 +54,17 @@ public class EmailVerificationExceptionHandler {
 				status, status.getReasonPhrase());
 		ProblemDetail problem = problems.create(type, detail(error.getReason()), request.getRequestURI());
 		problem.setProperty("code", code);
+		HttpHeaders headers = new HttpHeaders();
+		LocalDateTime retryAt = error.getRetryAt();
+		if (retryAt != null) {
+			problem.setProperty("resendAvailableAt", retryAt.format(RETRY_AT_FORMAT));
+			long milliseconds = Duration.between(LocalDateTime.now(KST), retryAt).toMillis();
+			if (milliseconds > 0) {
+				headers.set(HttpHeaders.RETRY_AFTER, Long.toString((milliseconds + 999) / 1000));
+			}
+		}
 		return ResponseEntity.status(status)
+				.headers(headers)
 				.contentType(MediaType.APPLICATION_PROBLEM_JSON)
 				.body(problem);
 	}
@@ -74,6 +88,7 @@ public class EmailVerificationExceptionHandler {
 	private static HttpStatus status(EmailVerificationFailure reason) {
 		return switch (reason) {
 			case VERIFICATION_UNAVAILABLE, EMAIL_SEND_FAILED -> HttpStatus.SERVICE_UNAVAILABLE;
+			case RATE_LIMITED, ATTEMPTS_EXHAUSTED -> HttpStatus.TOO_MANY_REQUESTS;
 			case EMAIL_ALREADY_EXISTS -> HttpStatus.CONFLICT;
 			default -> HttpStatus.BAD_REQUEST;
 		};
@@ -87,6 +102,8 @@ public class EmailVerificationExceptionHandler {
 			case EMAIL_SEND_FAILED -> "인증 이메일 발송에 실패했습니다. 다시 시도해주세요.";
 			case VERIFICATION_UNAVAILABLE -> "이메일 인증을 처리할 수 없습니다. 잠시 후 다시 시도해주세요.";
 			case EMAIL_ALREADY_EXISTS -> "이미 가입된 이메일입니다.";
+			case RATE_LIMITED -> "잠시 후 다시 시도해주세요.";
+			case ATTEMPTS_EXHAUSTED -> "인증 시도 횟수가 끝났습니다. 이메일 인증 코드를 다시 요청해주세요.";
 			default -> "이메일 인증 정보를 확인해주세요.";
 		};
 	}

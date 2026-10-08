@@ -234,7 +234,9 @@ class AuthSessionSecurityIntegrationTest {
 		assertThat(configuration.getAllowedMethods())
 				.containsExactly("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS");
 		assertThat(configuration.getAllowedHeaders()).containsExactly("*");
-		assertThat(configuration.getExposedHeaders()).containsExactly(HttpHeaders.AUTHORIZATION);
+		assertThat(configuration.getExposedHeaders()).containsExactly(
+				HttpHeaders.AUTHORIZATION,
+				HttpHeaders.RETRY_AFTER);
 		assertThat(configuration.getAllowCredentials()).isTrue();
 	}
 

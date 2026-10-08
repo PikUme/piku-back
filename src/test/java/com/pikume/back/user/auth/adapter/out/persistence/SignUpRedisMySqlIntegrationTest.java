@@ -229,7 +229,7 @@ class SignUpRedisMySqlIntegrationTest {
 	private static void verifyCode(EmailVerificationStorePort store, String email, String code) {
 		String emailKey = EmailVerificationService.hash(email);
 		String generation = "generation-" + email;
-		store.reserve(emailKey, generation, EmailVerificationService.hash(code));
+		store.reserve(emailKey, generation, EmailVerificationService.hash(code), UUID.randomUUID().toString());
 		store.activate(emailKey, generation);
 		assertThat(store.verify(emailKey, EmailVerificationService.hash(code), UUID.randomUUID().toString(),
 				EmailVerificationService.hash(SIGNUP_TOKEN)).status())
@@ -258,8 +258,8 @@ class SignUpRedisMySqlIntegrationTest {
 		}
 
 		@Override
-		public boolean reserve(String emailKey, String generation, String codeHash) {
-			return delegate.reserve(emailKey, generation, codeHash);
+		public ReservationResult reserve(String emailKey, String generation, String codeHash, String requestId) {
+			return delegate.reserve(emailKey, generation, codeHash, requestId);
 		}
 
 		@Override
