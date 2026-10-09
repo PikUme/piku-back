@@ -3,6 +3,7 @@ package com.pikume.back.user.application.service;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -14,6 +15,9 @@ import com.pikume.back.user.application.port.out.ResolveFixedCharacterAvatarPort
 import com.pikume.back.user.application.port.out.CheckUserUniquenessPort;
 import com.pikume.back.user.application.port.out.LoadUserForProfilePort;
 import com.pikume.back.user.application.port.out.NicknameHoldPort;
+import com.pikume.back.user.application.port.out.NicknameWriteTransactionPort;
+import com.pikume.back.user.application.port.out.NicknameIdentityPort;
+import com.pikume.back.user.application.dto.NicknameHoldSnapshot;
 import com.pikume.back.user.application.port.out.RecordUserAccountPort;
 import com.pikume.back.user.application.dto.UpdateProfileCommand;
 import com.pikume.back.user.application.dto.UpdateProfileFailureReason;
@@ -38,6 +42,8 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.lenient;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("UserProfileCommandService")
@@ -58,6 +64,18 @@ class UserProfileCommandServiceTest {
 	private ResolveFixedCharacterAvatarPort fixedCharacterAvatarPort;
 	@Mock
 	private NicknamePolicy nicknamePolicy;
+	@Mock
+	private NicknameWriteTransactionPort nicknameWriteTransactionPort;
+	@Mock
+	private NicknameIdentityPort nicknameIdentityPort;
+
+	@BeforeEach
+	void executeWriteTransactionsInline() {
+		lenient().doAnswer(invocation -> ((java.util.function.Supplier<?>) invocation.getArgument(0)).get())
+				.when(nicknameWriteTransactionPort).execute(any());
+		lenient().when(nicknameIdentityPort.keyFor(any())).thenAnswer(invocation ->
+				((Nickname) invocation.getArgument(0)).value());
+	}
 
 	@Nested
 	@DisplayName("reserveIfAvailable - 닉네임 사용 가능 확인")
@@ -183,6 +201,9 @@ class UserProfileCommandServiceTest {
 			UpdateProfileCommand command = new UpdateProfileCommand("user-1", " \u2003새닉\u3000 ", null);
 			given(loadUserForProfilePort.loadProfileUser("user-1")).willReturn(Optional.of(user));
 			given(nicknameHoldPort.isHeldBy(eq(new Nickname("새닉")), eq("user-1"), any(Instant.class))).willReturn(true);
+			given(nicknameHoldPort.loadForOwner("user-1")).willReturn(Optional.of(
+					new NicknameHoldSnapshot("새닉", "key", "version")));
+			given(nicknameIdentityPort.keyFor(new Nickname("새닉"))).willReturn("key");
 			given(recordUserAccountPort.recordUserAccount(user)).willReturn(user);
 
 			UpdateProfileResult result = service.updateProfile(command);
@@ -190,7 +211,25 @@ class UserProfileCommandServiceTest {
 			assertThat(result.success()).isTrue();
 			assertThat(result.newNickname()).isEqualTo("새닉");
 			assertThat(user.getNickname()).isEqualTo("새닉");
-			then(nicknameHoldPort).should().release(new Nickname("새닉"), "user-1");
+			then(nicknameHoldPort).should().releaseIfVersionMatches("user-1", new NicknameHoldSnapshot("새닉", "key", "version"));
+		}
+
+		@Test
+		@DisplayName("DB collation상 같은 닉네임이면 표시문자열이 달라도 기존 예약을 조건부 정리한다")
+		void releasesCollationEquivalentNicknameHold() {
+			User user = new User("user-1", "test@test.com", "pw", "현재닉", 1L);
+			NicknameHoldSnapshot existingHold = new NicknameHoldSnapshot("Café", "db-weight-key", "version");
+			given(loadUserForProfilePort.loadProfileUser("user-1")).willReturn(Optional.of(user));
+			given(nicknameHoldPort.isHeldBy(eq(new Nickname("CAFE")), eq("user-1"), any(Instant.class)))
+					.willReturn(true);
+			given(nicknameHoldPort.loadForOwner("user-1")).willReturn(Optional.of(existingHold));
+			given(nicknameIdentityPort.keyFor(new Nickname("CAFE"))).willReturn("db-weight-key");
+			given(recordUserAccountPort.recordUserAccount(user)).willReturn(user);
+
+			UpdateProfileResult result = service.updateProfile(new UpdateProfileCommand("user-1", "CAFE", null));
+
+			assertThat(result.success()).isTrue();
+			then(nicknameHoldPort).should().releaseIfVersionMatches("user-1", existingHold);
 		}
 
 		@Test
@@ -203,7 +242,9 @@ class UserProfileCommandServiceTest {
 					recordUserAccountPort,
 					checkUserUniquenessPort,
 					fixedCharacterAvatarPort,
-					holdAdapter);
+					holdAdapter,
+					nicknameWriteTransactionPort,
+					nickname -> nickname.value());
 			given(loadUserForProfilePort.loadProfileUser("user-1")).willReturn(Optional.of(user));
 
 			boolean reserved = integratedService.reserveIfAvailable(" \u2003새닉\u3000 ", "user-1");
@@ -267,13 +308,16 @@ class UserProfileCommandServiceTest {
 			UpdateProfileCommand command = new UpdateProfileCommand("user-1", "새닉", null);
 			given(loadUserForProfilePort.loadProfileUser("user-1")).willReturn(Optional.of(user));
 			given(nicknameHoldPort.isHeldBy(eq(new Nickname("새닉")), eq("user-1"), any(Instant.class))).willReturn(true);
+			given(nicknameHoldPort.loadForOwner("user-1")).willReturn(Optional.of(
+					new NicknameHoldSnapshot("새닉", "key", "version")));
+			given(nicknameIdentityPort.keyFor(new Nickname("새닉"))).willReturn("key");
 			given(recordUserAccountPort.recordUserAccount(user)).willReturn(user);
 
 			UpdateProfileResult result = service.updateProfile(command);
 
 			assertThat(result.success()).isTrue();
 			assertThat(result.avatarReference()).isNull();
-			verify(nicknameHoldPort).release(new Nickname("새닉"), "user-1");
+			verify(nicknameHoldPort).releaseIfVersionMatches(eq("user-1"), any(NicknameHoldSnapshot.class));
 		}
 
 		@Test

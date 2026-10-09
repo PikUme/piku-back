@@ -3,6 +3,7 @@ package com.pikume.back.user.auth.application.service;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -11,6 +12,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.pikume.back.user.application.port.out.CheckUserUniquenessPort;
 import com.pikume.back.user.application.port.out.LoadUserForPasswordResetPort;
 import com.pikume.back.user.application.port.out.RecordUserAccountPort;
+import com.pikume.back.user.application.port.out.NicknameIdentityPort;
+import com.pikume.back.user.application.port.out.NicknameReservationStorePort;
+import com.pikume.back.user.application.port.out.NicknameWriteTransactionPort;
 import com.pikume.back.user.auth.application.dto.ResetPasswordCommand;
 import com.pikume.back.user.auth.application.dto.SignUpCommand;
 import com.pikume.back.user.auth.application.dto.SignupEmailProof;
@@ -33,6 +37,7 @@ import com.pikume.back.user.domain.service.PasswordPolicy;
 import java.lang.reflect.Field;
 import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -41,6 +46,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.lenient;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("AuthService")
@@ -77,10 +83,25 @@ class AuthServiceTest {
 	private EmailVerificationOperationsAlertPort verificationAlerts;
 	@Mock
 	private SignUpTransactionPort signUpTransactionPort;
+	@Mock
+	private NicknameWriteTransactionPort nicknameWriteTransactionPort;
+	@Mock
+	private NicknameIdentityPort nicknameIdentityPort;
+	@Mock
+	private NicknameReservationStorePort nicknameReservationStorePort;
 	@Spy
 	private EmailVerificationPolicy emailVerificationPolicy = new EmailVerificationPolicy();
 	@Spy
 	private PasswordPolicy passwordPolicy = new PasswordPolicy();
+
+	@BeforeEach
+	void configureNicknameWritePorts() {
+		lenient().doAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get())
+				.when(nicknameWriteTransactionPort).execute(any());
+		lenient().when(nicknameIdentityPort.keyFor(any())).thenReturn("nickname-key");
+		lenient().when(nicknameReservationStorePort.isReservedByOther(any(), any())).thenReturn(false);
+		lenient().when(nicknameReservationStorePort.load(any())).thenReturn(Optional.empty());
+	}
 
 	@Nested
 	@DisplayName("signup")
@@ -134,8 +155,6 @@ class AuthServiceTest {
 		void signupSuccess() throws Exception {
 			SignUpCommand dto = new SignUpCommand("test@piku.store", "abc@123", " \u2003테스트\u3000 ", 1L, "signup-proof-token");
 
-			given(checkUserUniquenessPort.isEmailRegistered("test@piku.store")).willReturn(false);
-
 			given(emailVerificationStorePort.loadProof(EmailVerificationService.hash("test@piku.store"), EmailVerificationService.hash("signup-proof-token")))
 					.willReturn(Optional.of(new SignupEmailProof("proof-version", EmailVerificationService.hash("signup-proof-token"), LocalDateTime.now().plusMinutes(10))));
 			given(passwordProtectionPort.protect("abc@123")).willReturn("encodedPw");
@@ -155,7 +174,6 @@ class AuthServiceTest {
 		@DisplayName("존재하지 않는 고정 캐릭터로 회원가입 시 예외가 발생하고 저장하지 않는다")
 		void signupFailFixedCharacterNotFound() throws Exception {
 			SignUpCommand dto = new SignUpCommand("test@piku.store", "abc@123", "테스트", 999L, "signup-proof-token");
-			given(checkUserUniquenessPort.isEmailRegistered("test@piku.store")).willReturn(false);
 
 			given(emailVerificationStorePort.loadProof(EmailVerificationService.hash("test@piku.store"), EmailVerificationService.hash("signup-proof-token")))
 					.willReturn(Optional.of(new SignupEmailProof("proof-version", EmailVerificationService.hash("signup-proof-token"), LocalDateTime.now().plusMinutes(10))));
@@ -178,6 +196,7 @@ class AuthServiceTest {
 					.willReturn(Optional.of(new SignupEmailProof("proof-version",
 							EmailVerificationService.hash("signup-proof-token"), LocalDateTime.now().plusMinutes(10))));
 			given(checkUserUniquenessPort.isEmailRegistered("dup@piku.store")).willReturn(true);
+			given(checkSignUpCharacterSelectionPort.isSelectableFixedCharacter(1L)).willReturn(true);
 
 			assertThatThrownBy(() -> authService.signUp(dto))
 					.isInstanceOf(AuthException.class);

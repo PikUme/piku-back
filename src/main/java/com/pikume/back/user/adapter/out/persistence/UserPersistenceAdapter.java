@@ -66,6 +66,13 @@ public class UserPersistenceAdapter implements RecordUserAccountPort {
 	 * @throws DataIntegrityViolationException 이메일·닉네임 중복으로 구분할 수 없는 제약 위반
 	 */
 	@Override
+	public void updatePasswordOnly(String userId, String passwordHash) {
+		if (jpaRepository.updatePasswordOnly(userId, passwordHash) == 0) {
+			throw new IllegalStateException("User disappeared during password update");
+		}
+	}
+
+	@Override
 	public User recordUserAccount(User user) {
 		try {
 			return jpaRepository.saveAndFlush(user);

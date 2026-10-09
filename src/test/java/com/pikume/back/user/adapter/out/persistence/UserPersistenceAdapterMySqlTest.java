@@ -1,6 +1,8 @@
 package com.pikume.back.user.adapter.out.persistence;
 
 import com.pikume.back.user.domain.User;
+import com.pikume.back.user.domain.vo.Email;
+import com.pikume.back.user.domain.vo.Nickname;
 import com.pikume.back.user.domain.exception.EmailAlreadyExistsException;
 import com.pikume.back.user.domain.exception.NicknameAlreadyExistsException;
 import org.junit.jupiter.api.DisplayName;
@@ -19,6 +21,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -82,6 +86,45 @@ class UserPersistenceAdapterMySqlTest {
 				.isInstanceOf(NicknameAlreadyExistsException.class);
 
 		assertThat(countBy("email", "new@example.com")).isZero();
+	}
+
+	@Test
+	@DisplayName("Redis 닉네임 키는 실제 MySQL collation의 동등성 관계와 같다")
+	void nicknameKeyEqualityMatchesMySqlCollation() {
+		MySqlNicknameIdentityAdapter identity = new MySqlNicknameIdentityAdapter(jdbcTemplate);
+		List<String[]> pairs = List.of(
+				new String[] {"Café", "CAFE"},
+				new String[] {"é", "e\u0301"},
+				new String[] {"가", "가"},
+				new String[] {"😀Nick", "😀nick"},
+				new String[] {" name ", "name"});
+
+		for (String[] pair : pairs) {
+			Nickname first = new Nickname(pair[0]);
+			Nickname second = new Nickname(pair[1]);
+			Boolean mysqlEqual = jdbcTemplate.queryForObject("""
+					SELECT CAST(? AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_0900_ai_ci
+						= CAST(? AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_0900_ai_ci
+					""", Boolean.class, first.value(), second.value());
+			assertThat(identity.keyFor(first).equals(identity.keyFor(second))).isEqualTo(mysqlEqual);
+		}
+	}
+
+	@Test
+	@DisplayName("비밀번호 재설정은 stale 회원 값으로 최신 닉네임을 되돌리지 않는다")
+	void passwordOnlyUpdateDoesNotOverwriteNickname() {
+		User original = new User("password-reset@example.com", "old-hash", "before", 1L);
+		persist(original);
+		User staleSnapshot = userJpaRepository.findByEmail(new Email("password-reset@example.com")).orElseThrow();
+		User latest = userJpaRepository.findByEmail(new Email("password-reset@example.com")).orElseThrow();
+		latest.changeNickname(new Nickname("after"));
+		persist(latest);
+
+		new UserPersistenceAdapter(userJpaRepository).updatePasswordOnly(staleSnapshot.getId(), "new-hash");
+
+		User stored = userJpaRepository.findByEmail(new Email("password-reset@example.com")).orElseThrow();
+		assertThat(stored.getNickname()).isEqualTo("after");
+		assertThat(stored.getPassword()).isEqualTo("new-hash");
 	}
 
 	private long countBy(String column, String value) {

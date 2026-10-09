@@ -10,6 +10,9 @@ import com.pikume.back.user.application.port.out.CheckUserUniquenessPort;
 import com.pikume.back.user.application.port.out.LoadUserForPasswordResetPort;
 import com.pikume.back.user.application.port.out.LoadUserForProfilePort;
 import com.pikume.back.user.application.port.out.RecordUserAccountPort;
+import com.pikume.back.user.application.port.out.NicknameReservationStorePort;
+import com.pikume.back.user.application.port.out.NicknameIdentityPort;
+import com.pikume.back.user.application.port.out.NicknameWriteTransactionPort;
 import com.pikume.back.user.application.port.out.ResolveFixedCharacterAvatarPort;
 import com.pikume.back.user.application.service.UserProfileCommandService;
 import com.pikume.back.user.auth.adapter.in.web.AuthController;
@@ -100,6 +103,10 @@ class NicknameWebContractTest {
 
 		QueryAllowedEmailUseCase queryAllowedEmailUseCase = mock(QueryAllowedEmailUseCase.class);
 		SignUpTransactionPort signUpTransactionPort = userAccountStore::recordUserAccount;
+		NicknameReservationStorePort reservationStore = mock(NicknameReservationStorePort.class);
+		given(reservationStore.isReservedByOther(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+				.willReturn(false);
+		given(reservationStore.load(org.mockito.ArgumentMatchers.any())).willReturn(Optional.empty());
 		AuthService authService = new AuthService(
 				mock(LoadUserForPasswordResetPort.class),
 				userAccountStore,
@@ -115,13 +122,28 @@ class NicknameWebContractTest {
 				new PasswordPolicy(),
 				emailVerificationStorePort,
 				mock(EmailVerificationOperationsAlertPort.class),
-				signUpTransactionPort);
+				signUpTransactionPort,
+				new NicknameWriteTransactionPort() {
+					@Override
+					public <T> T execute(java.util.function.Supplier<T> operation) {
+						return operation.get();
+					}
+				},
+				nickname -> nickname.value().toLowerCase(java.util.Locale.ROOT),
+				reservationStore);
 		UserProfileCommandService profileService = new UserProfileCommandService(
 				userAccountStore,
 				userAccountStore,
 				userAccountStore,
 				fixedCharacterAvatarPort,
-				nicknameHoldAdapter);
+				nicknameHoldAdapter,
+				new com.pikume.back.user.application.port.out.NicknameWriteTransactionPort() {
+					@Override
+					public <T> T execute(java.util.function.Supplier<T> operation) {
+						return operation.get();
+					}
+				},
+				nickname -> nickname.value());
 
 		ProblemDetailFactory problemDetailFactory = new ProblemDetailFactory();
 		AuthController authController = new AuthController(

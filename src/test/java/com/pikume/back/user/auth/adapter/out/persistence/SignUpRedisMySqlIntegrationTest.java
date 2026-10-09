@@ -10,9 +10,19 @@ import static org.mockito.Mockito.verify;
 import com.pikume.back.user.adapter.out.persistence.UserAccountPersistenceAdapter;
 import com.pikume.back.user.adapter.out.persistence.UserJpaRepository;
 import com.pikume.back.user.adapter.out.persistence.UserPersistenceAdapter;
+import com.pikume.back.user.adapter.out.persistence.MySqlNicknameIdentityAdapter;
+import com.pikume.back.user.adapter.out.persistence.MySqlNicknameWriteTransactionAdapter;
+import com.pikume.back.user.adapter.out.cache.RedisNicknameReservationAdapter;
+import com.pikume.back.user.adapter.out.cache.RedisNicknameHoldAdapter;
 import com.pikume.back.user.application.port.out.CheckUserUniquenessPort;
 import com.pikume.back.user.application.port.out.LoadUserForPasswordResetPort;
 import com.pikume.back.user.application.port.out.RecordUserAccountPort;
+import com.pikume.back.user.application.port.out.NicknameReservationStorePort;
+import com.pikume.back.user.application.port.out.NicknameHoldPort;
+import com.pikume.back.user.application.service.UserProfileCommandService;
+import com.pikume.back.user.application.port.out.ResolveFixedCharacterAvatarPort;
+import com.pikume.back.user.domain.vo.Nickname;
+import com.pikume.back.user.application.exception.NicknameReservationConflictException;
 import com.pikume.back.user.auth.adapter.out.cache.RedisEmailVerificationAdapter;
 import com.pikume.back.user.auth.application.exception.AuthException;
 import com.pikume.back.user.auth.application.port.out.CheckSignUpCharacterSelectionPort;
@@ -30,6 +40,7 @@ import com.pikume.back.user.auth.application.service.EmailVerificationService;
 import com.pikume.back.user.auth.domain.service.EmailVerificationPolicy;
 import com.pikume.back.user.auth.application.dto.SignUpCommand;
 import com.pikume.back.user.auth.application.dto.SignupEmailProof;
+import com.pikume.back.user.application.dto.NicknameReservationResult;
 import com.pikume.back.user.domain.User;
 import com.pikume.back.user.domain.exception.NicknameAlreadyExistsException;
 import com.pikume.back.user.domain.service.PasswordPolicy;
@@ -40,12 +51,15 @@ import java.time.LocalDateTime;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
@@ -111,15 +125,31 @@ class SignUpRedisMySqlIntegrationTest {
 	private UserPersistenceAdapter userPersistence;
 	@Autowired
 	private SignUpTransactionPort transactions;
+	@Autowired
+	private JdbcTemplate jdbcTemplate;
+	@Autowired
+	private PlatformTransactionManager transactionManager;
 
 	@BeforeEach
 	void clearDatabase() {
 		users.deleteAllInBatch();
+		jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS nickname_write_mutex (id TINYINT NOT NULL PRIMARY KEY)");
+		jdbcTemplate.update("INSERT IGNORE INTO nickname_write_mutex (id) VALUES (1)");
 	}
 
 	@AfterEach
 	void clearRedis() {
 		redis.getConnectionFactory().getConnection().serverCommands().flushDb();
+	}
+
+	@Test
+	void preservesNicknameConflictThroughTheMySqlWriteTransaction() {
+		MySqlNicknameWriteTransactionAdapter writeTransaction =
+				new MySqlNicknameWriteTransactionAdapter(jdbcTemplate, transactionManager);
+
+		assertThatThrownBy(() -> writeTransaction.execute(() -> {
+			throw new NicknameReservationConflictException();
+		})).isInstanceOf(NicknameReservationConflictException.class);
 	}
 
 	@Test
@@ -134,6 +164,101 @@ class SignUpRedisMySqlIntegrationTest {
 		assertThat(users.findByEmail(new Email(email))).isPresent();
 		assertThat(store.loadProof(EmailVerificationService.hash(email), EmailVerificationService.hash(SIGNUP_TOKEN)))
 				.isEmpty();
+	}
+
+	@Test
+	void signupWithAnotherNicknameCommitsThenConditionallyClearsSignupOwnersCapturedHold() {
+		String email = "replace-hold@example.com";
+		RedisEmailVerificationAdapter proofStore = new RedisEmailVerificationAdapter(redis);
+		verifyCode(proofStore, email, "123456");
+		NicknameReservationStorePort delegate = new RedisNicknameReservationAdapter(redis);
+		String owner = "signup:" + EmailVerificationService.hash(email);
+		NicknameReservationResult existing = delegate.reserve(owner,
+				new MySqlNicknameIdentityAdapter(jdbcTemplate).keyFor(new Nickname("reserved-a")), "Reserved A");
+		AtomicBoolean accountVisibleAtCleanup = new AtomicBoolean();
+		AtomicBoolean cleanupWasOutsideTransaction = new AtomicBoolean();
+		AtomicBoolean firstCleanupObserved = new AtomicBoolean();
+		NicknameReservationStorePort reservations = new ObservedReservationStore(delegate,
+				() -> {
+					if (firstCleanupObserved.compareAndSet(false, true)) {
+						accountVisibleAtCleanup.set(users.findByEmail(new Email(email)).isPresent());
+						cleanupWasOutsideTransaction.set(!org.springframework.transaction.support.TransactionSynchronizationManager
+								.isActualTransactionActive());
+					}
+				});
+
+		authService(proofStore, mock(EmailVerificationOperationsAlertPort.class), transactions, reservations)
+				.signUp(command(email, "signup-b"));
+
+		assertThat(users.findByEmail(new Email(email))).isPresent();
+		assertThat(reservations.load(owner)).isEmpty();
+		assertThat(accountVisibleAtCleanup).isTrue();
+		assertThat(cleanupWasOutsideTransaction).isTrue();
+		assertThat(delegate.releaseIfVersionMatches(owner, existing.nicknameKey(), existing.version())).isFalse();
+	}
+
+	@Test
+	void failedSignupAfterMysqlInsertRollsBackAndPreservesActualRedisHoldAndProof() {
+		String email = "rollback-hold@example.com";
+		RedisEmailVerificationAdapter proofStore = new RedisEmailVerificationAdapter(redis);
+		verifyCode(proofStore, email, "123456");
+		NicknameReservationStorePort reservations = new RedisNicknameReservationAdapter(redis);
+		String owner = "signup:" + EmailVerificationService.hash(email);
+		NicknameReservationResult existing = reservations.reserve(owner, "hold-key", "Hold A");
+		SignUpTransactionPort insertThenFail = user -> {
+			transactions.register(user);
+			throw new IllegalStateException("forced failure after MySQL insert");
+		};
+
+		assertThatThrownBy(() -> authService(proofStore, mock(EmailVerificationOperationsAlertPort.class),
+				insertThenFail, reservations).signUp(command(email, "rollback-name")))
+				.isInstanceOf(IllegalStateException.class);
+
+		assertThat(users.findByEmail(new Email(email))).isEmpty();
+		assertThat(proofStore.loadProof(EmailVerificationService.hash(email), EmailVerificationService.hash(SIGNUP_TOKEN)))
+				.isPresent();
+		assertThat(reservations.load(owner)).contains(existing);
+	}
+
+	@Test
+	void profileReservationAndSignupShareTheMySqlWriteMutexAroundRealRedis() throws Exception {
+		String userId = transactions.register(
+				new User("profile-race@example.com", "password-hash", "profile-before", 1L)).getId();
+		String email = "signup-race@example.com";
+		RedisEmailVerificationAdapter proofStore = new RedisEmailVerificationAdapter(redis);
+		verifyCode(proofStore, email, "123456");
+		NicknameReservationStorePort reservations = new RedisNicknameReservationAdapter(redis);
+		NicknameHoldPort holds = new RedisNicknameHoldAdapter(reservations, new MySqlNicknameIdentityAdapter(jdbcTemplate));
+		UserProfileCommandService profile = new UserProfileCommandService(
+				accounts, userPersistence, accounts, mock(ResolveFixedCharacterAvatarPort.class), holds,
+				new MySqlNicknameWriteTransactionAdapter(jdbcTemplate, transactionManager),
+				new MySqlNicknameIdentityAdapter(jdbcTemplate));
+		AuthService signup = authService(proofStore, mock(EmailVerificationOperationsAlertPort.class));
+		CyclicBarrier start = new CyclicBarrier(2);
+		var executor = Executors.newFixedThreadPool(2);
+		try {
+			var profileAttempt = executor.submit(() -> {
+				start.await();
+				return profile.reserveIfAvailable("shared-race-name", userId);
+			});
+			var signupAttempt = executor.submit(() -> {
+				start.await();
+				try {
+					signup.signUp(command(email, "shared-race-name"));
+					return true;
+				} catch (AuthException exception) {
+					return false;
+				}
+			});
+			boolean profileReserved = profileAttempt.get(15, TimeUnit.SECONDS);
+			boolean accountCreated = signupAttempt.get(15, TimeUnit.SECONDS);
+
+			assertThat(profileReserved).isNotEqualTo(accountCreated);
+			assertThat(users.findByEmail(new Email(email)).isPresent()).isEqualTo(accountCreated);
+			assertThat(reservations.load("user:" + userId).isPresent()).isEqualTo(profileReserved);
+		} finally {
+			executor.shutdownNow();
+		}
 	}
 
 	@Test
@@ -204,6 +329,11 @@ class SignUpRedisMySqlIntegrationTest {
 	}
 
 	private AuthService authService(EmailVerificationStorePort store, EmailVerificationOperationsAlertPort alerts) {
+		return authService(store, alerts, transactions, new RedisNicknameReservationAdapter(redis));
+	}
+
+	private AuthService authService(EmailVerificationStorePort store, EmailVerificationOperationsAlertPort alerts,
+			SignUpTransactionPort signupTransactions, NicknameReservationStorePort reservations) {
 		CheckSignUpCharacterSelectionPort characters = mock(CheckSignUpCharacterSelectionPort.class);
 		given(characters.isSelectableFixedCharacter(1L)).willReturn(true);
 		PasswordProtectionPort passwords = mock(PasswordProtectionPort.class);
@@ -223,7 +353,46 @@ class SignUpRedisMySqlIntegrationTest {
 				new PasswordPolicy(),
 				store,
 				alerts,
-				transactions);
+				signupTransactions,
+				new MySqlNicknameWriteTransactionAdapter(jdbcTemplate, transactionManager),
+				new MySqlNicknameIdentityAdapter(jdbcTemplate),
+				reservations);
+	}
+
+	private static final class ObservedReservationStore implements NicknameReservationStorePort {
+		private final NicknameReservationStorePort delegate;
+		private final Runnable onRelease;
+
+		private ObservedReservationStore(NicknameReservationStorePort delegate, Runnable onRelease) {
+			this.delegate = delegate;
+			this.onRelease = onRelease;
+		}
+
+		@Override
+		public NicknameReservationResult reserve(String ownerKey, String nicknameKey, String nickname) {
+			return delegate.reserve(ownerKey, nicknameKey, nickname);
+		}
+
+		@Override
+		public Optional<NicknameReservationResult> load(String ownerKey) {
+			return delegate.load(ownerKey);
+		}
+
+		@Override
+		public boolean isHeldBy(String nicknameKey, String ownerKey) {
+			return delegate.isHeldBy(nicknameKey, ownerKey);
+		}
+
+		@Override
+		public boolean isReservedByOther(String nicknameKey, String ownerKey) {
+			return delegate.isReservedByOther(nicknameKey, ownerKey);
+		}
+
+		@Override
+		public boolean releaseIfVersionMatches(String ownerKey, String nicknameKey, String version) {
+			onRelease.run();
+			return delegate.releaseIfVersionMatches(ownerKey, nicknameKey, version);
+		}
 	}
 
 	private static void verifyCode(EmailVerificationStorePort store, String email, String code) {
