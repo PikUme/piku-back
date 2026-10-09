@@ -7,7 +7,7 @@ cd "$REPOSITORY_ROOT"
 
 usage() {
   cat >&2 <<'EOF'
-usage: scripts/compose.sh <dev|prod|monitor> <up|down|rebuild-app|ps|logs> [options]
+usage: scripts/compose.sh <dev|dev-mailpit|prod|monitor> <up|down|rebuild-app|ps|logs> [options]
 EOF
 }
 
@@ -21,7 +21,7 @@ action=$2
 shift 2
 
 case "$environment" in
-  dev | prod | monitor)
+  dev | dev-mailpit | prod | monitor)
     ;;
   *)
     usage
@@ -36,6 +36,22 @@ run_compose() {
         -f docker-compose.dev.yml \
         -f docker-compose.infra.yml \
         "$@"
+      ;;
+    dev-mailpit)
+      project_directory=${DEV_COMPOSE_PROJECT_DIRECTORY:-$(git -C "$REPOSITORY_ROOT" worktree list --porcelain | sed -n '1s/^worktree //p')}
+      if [ -z "$project_directory" ] || [ ! -d "$project_directory" ]; then
+        printf 'Unable to locate the primary worktree for dev-mailpit\n' >&2
+        exit 1
+      fi
+      project_name=${DEV_COMPOSE_PROJECT_NAME:-$(basename "$project_directory")}
+      PIKU_BACK_APP_BUILD_CONTEXT="$REPOSITORY_ROOT" \
+        docker compose \
+          --project-directory "$project_directory" \
+          --project-name "$project_name" \
+          -f "$REPOSITORY_ROOT/docker-compose.dev.yml" \
+          -f "$REPOSITORY_ROOT/docker-compose.infra.yml" \
+          -f "$REPOSITORY_ROOT/docker-compose.mailpit.yml" \
+          "$@"
       ;;
     prod)
       docker compose \

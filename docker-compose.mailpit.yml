@@ -1,0 +1,27 @@
+services:
+  app:
+    build:
+      context: ${PIKU_BACK_APP_BUILD_CONTEXT:-.}
+    depends_on:
+      mailpit:
+        condition: service_healthy
+    environment:
+      SPRING_MAIL_HOST: mailpit
+      SPRING_MAIL_PORT: 1025
+      SPRING_MAIL_USERNAME: signup-test@pikume.test
+      SPRING_MAIL_PASSWORD: ""
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH: "false"
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: "false"
+
+  mailpit:
+    image: axllent/mailpit:v1.31.4
+    ports:
+      - target: 1025
+        published: "${MAILPIT_SMTP_PORT:-1025}"
+        host_ip: 127.0.0.1
+        protocol: tcp
+      - target: 8025
+        published: "${MAILPIT_UI_PORT:-8025}"
+        host_ip: 127.0.0.1
+        protocol: tcp
+    restart: unless-stopped

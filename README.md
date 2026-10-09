@@ -68,6 +68,12 @@ Pikume 프로젝트의 백엔드 저장소입니다.
       down
     ```
 
+    로컬 회원가입 인증 메일을 Mailpit에서 확인하려면 선택형 모드를 사용합니다. 실행과 실제 API 검증 절차는 [로컬 Mailpit 회원가입 검증 절차서](docs/runbooks/local-mailpit-signup-runbook.md)를 참고하세요.
+
+    ```bash
+    scripts/compose.sh dev-mailpit up
+    ```
+
 ### 운영용 앱 실행
 
 운영용 애플리케이션 컨테이너는 루트 `.env` 파일을 기준으로 환경변수를 주입받고 Redis, MinIO 인프라 구성과 함께 실행됩니다.
