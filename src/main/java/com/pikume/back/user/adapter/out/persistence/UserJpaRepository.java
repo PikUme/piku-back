@@ -3,8 +3,8 @@ package com.pikume.back.user.adapter.out.persistence;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Lock;
-import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import com.pikume.back.user.domain.User;
@@ -27,10 +27,6 @@ public interface UserJpaRepository extends JpaRepository<User, String> {
 	}
 
 	Optional<User> findByEmail(Email email);
-
-	@Lock(LockModeType.PESSIMISTIC_WRITE)
-	@Query("select u from User u where u.email = :email")
-	Optional<User> findByEmailForUpdate(@Param("email") Email email);
 
 	boolean existsByEmail(Email email);
 
@@ -64,9 +60,10 @@ public interface UserJpaRepository extends JpaRepository<User, String> {
 	@Query(value = "SELECT * FROM users WHERE nickname LIKE :keyword AND deleted_at IS NULL", nativeQuery = true)
 	Page<User> searchByName(@Param("keyword") String keyword, Pageable pageable);
 
-	@Lock(LockModeType.PESSIMISTIC_WRITE)
-	@Query("select u from User u where u.id = :id")
-	Optional<User> findByIdForUpdate(@Param("id") String id);
-
 	boolean existsByNickname(Nickname nickname);
+
+	@Modifying
+	@Transactional
+	@Query(value = "UPDATE users SET password = :passwordHash, updated_at = CURRENT_TIMESTAMP(6) WHERE id = :userId", nativeQuery = true)
+	int updatePasswordOnly(@Param("userId") String userId, @Param("passwordHash") String passwordHash);
 }

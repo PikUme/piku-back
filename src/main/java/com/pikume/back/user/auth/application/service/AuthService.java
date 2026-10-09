@@ -1,18 +1,16 @@
 package com.pikume.back.user.auth.application.service;
 
 import com.pikume.back.user.application.port.out.CheckUserUniquenessPort;
-import com.pikume.back.user.application.port.out.NicknameHoldPort;
-import com.pikume.back.user.domain.vo.Nickname;
-import java.time.Instant;
 import com.pikume.back.user.application.port.out.LoadUserForPasswordResetPort;
 import com.pikume.back.user.application.port.out.RecordUserAccountPort;
+import com.pikume.back.user.application.dto.NicknameReservationResult;
+import com.pikume.back.user.application.port.out.NicknameIdentityPort;
+import com.pikume.back.user.application.port.out.NicknameReservationStorePort;
+import com.pikume.back.user.application.port.out.NicknameWriteTransactionPort;
 import com.pikume.back.user.auth.application.dto.ResetPasswordCommand;
 import com.pikume.back.user.auth.application.dto.SignUpCommand;
-import com.pikume.back.user.auth.application.dto.NicknameReservationResult;
 import com.pikume.back.user.auth.application.dto.VerifyEmailCommand;
-import com.pikume.back.user.auth.application.port.out.EmailVerificationStorePort;
-import com.pikume.back.user.auth.application.exception.EmailVerificationException;
-import com.pikume.back.user.auth.application.exception.EmailVerificationFailure;
+import com.pikume.back.user.auth.application.dto.SignupEmailProof;
 import com.pikume.back.user.auth.application.port.in.ResetPasswordUseCase;
 import com.pikume.back.user.auth.application.port.in.SignUpUseCase;
 import com.pikume.back.user.auth.application.port.in.VerifyEmailUseCase;
@@ -23,12 +21,17 @@ import com.pikume.back.user.auth.application.port.out.PasswordProtectionPort;
 import com.pikume.back.user.auth.application.port.out.ManageVerificationPort;
 import com.pikume.back.user.auth.application.port.out.RecordCompletedEmailVerificationPort;
 import com.pikume.back.user.auth.application.port.out.IssueVerificationEmailPort;
+import com.pikume.back.user.auth.application.port.out.EmailVerificationStorePort;
+import com.pikume.back.user.auth.application.port.out.EmailVerificationOperationsAlertPort;
+import com.pikume.back.user.auth.application.port.out.SignUpTransactionPort;
 import com.pikume.back.user.auth.domain.Verification;
 import com.pikume.back.user.auth.domain.VerifiedEmail;
 import com.pikume.back.user.auth.domain.service.EmailVerificationPolicy;
 import com.pikume.back.user.auth.domain.vo.VerificationType;
 import com.pikume.back.user.auth.application.exception.AuthErrorCode;
 import com.pikume.back.user.auth.application.exception.AuthException;
+import com.pikume.back.user.auth.application.exception.EmailVerificationException;
+import com.pikume.back.user.auth.application.exception.EmailVerificationFailure;
 import com.pikume.back.user.domain.User;
 import com.pikume.back.user.domain.exception.EmailAlreadyExistsException;
 import com.pikume.back.user.domain.exception.InvalidEmailException;
@@ -36,16 +39,18 @@ import com.pikume.back.user.domain.exception.InvalidPasswordException;
 import com.pikume.back.user.domain.exception.NicknameAlreadyExistsException;
 import com.pikume.back.user.domain.service.PasswordPolicy;
 import com.pikume.back.user.domain.vo.Email;
-import lombok.RequiredArgsConstructor;
+import com.pikume.back.user.domain.vo.Nickname;
+import org.springframework.beans.factory.annotation.Autowired;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Locale;
+import java.util.function.Supplier;
 
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPasswordUseCase {
 
 	private final LoadUserForPasswordResetPort loadUserForPasswordResetPort;
@@ -58,33 +63,68 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 	private final IssueVerificationEmailPort issueVerificationEmailPort;
 	private final PasswordProtectionPort passwordProtectionPort;
 	private final CheckSignUpCharacterSelectionPort checkSignUpCharacterSelectionPort;
-	private final EmailVerificationStorePort emailVerificationStorePort;
 	private final EmailVerificationPolicy emailVerificationPolicy;
 	private final PasswordPolicy passwordPolicy;
-	private final NicknameHoldPort nicknameHoldPort;
+	private final EmailVerificationStorePort emailVerificationStorePort;
+	private final EmailVerificationOperationsAlertPort verificationAlerts;
+	private final SignUpTransactionPort signUpTransactionPort;
+	private final NicknameWriteTransactionPort nicknameWriteTransactionPort;
+	private final NicknameIdentityPort nicknameIdentityPort;
+	private final NicknameReservationStorePort nicknameReservationStorePort;
+
+	@Autowired
+	public AuthService(LoadUserForPasswordResetPort loadUserForPasswordResetPort,
+			CheckUserUniquenessPort checkUserUniquenessPort,
+			RecordUserAccountPort recordUserAccountPort,
+			LoadVerificationPort loadVerificationPort,
+			ManageVerificationPort manageVerificationPort,
+			LoadCompletedEmailVerificationPort loadCompletedEmailVerificationPort,
+			RecordCompletedEmailVerificationPort recordCompletedEmailVerificationPort,
+			IssueVerificationEmailPort issueVerificationEmailPort,
+			PasswordProtectionPort passwordProtectionPort,
+			CheckSignUpCharacterSelectionPort checkSignUpCharacterSelectionPort,
+			EmailVerificationPolicy emailVerificationPolicy,
+			PasswordPolicy passwordPolicy,
+			EmailVerificationStorePort emailVerificationStorePort,
+			EmailVerificationOperationsAlertPort verificationAlerts,
+			SignUpTransactionPort signUpTransactionPort,
+			NicknameWriteTransactionPort nicknameWriteTransactionPort,
+			NicknameIdentityPort nicknameIdentityPort,
+			NicknameReservationStorePort nicknameReservationStorePort) {
+		this.loadUserForPasswordResetPort = loadUserForPasswordResetPort;
+		this.checkUserUniquenessPort = checkUserUniquenessPort;
+		this.recordUserAccountPort = recordUserAccountPort;
+		this.loadVerificationPort = loadVerificationPort;
+		this.manageVerificationPort = manageVerificationPort;
+		this.loadCompletedEmailVerificationPort = loadCompletedEmailVerificationPort;
+		this.recordCompletedEmailVerificationPort = recordCompletedEmailVerificationPort;
+		this.issueVerificationEmailPort = issueVerificationEmailPort;
+		this.passwordProtectionPort = passwordProtectionPort;
+		this.checkSignUpCharacterSelectionPort = checkSignUpCharacterSelectionPort;
+		this.emailVerificationPolicy = emailVerificationPolicy;
+		this.passwordPolicy = passwordPolicy;
+		this.emailVerificationStorePort = emailVerificationStorePort;
+		this.verificationAlerts = verificationAlerts;
+		this.signUpTransactionPort = signUpTransactionPort;
+		this.nicknameWriteTransactionPort = nicknameWriteTransactionPort;
+		this.nicknameIdentityPort = nicknameIdentityPort;
+		this.nicknameReservationStorePort = nicknameReservationStorePort;
+	}
 
 	@Override
-	@Transactional
 	public void signUp(SignUpCommand command) {
 		Nickname nickname = new Nickname(command.nickname());
 		requireValidEmail(command.email());
 		requireValidPassword(command.password());
-		Verification verified = requireVerifiedEmail(command.emailVerificationToken());
-		if (!verified.getEmail().equalsIgnoreCase(command.email())) {
-			throw new EmailVerificationException(EmailVerificationFailure.TOKEN_INVALID);
-		}
-		String ownerKey = emailOwnerKey(verified);
-		nicknameHoldPort.lockNicknameWrites();
-		if (checkUserUniquenessPort.isEmailRegistered(command.email())) {
-			throw new AuthException(AuthErrorCode.EMAIL_ALREADY_EXISTS);
+		if (command.emailVerificationToken() == null || command.emailVerificationToken().isBlank()) {
+			throw new EmailVerificationException(EmailVerificationFailure.VERIFICATION_INVALID);
 		}
 
-		Instant nicknameCheckedAt = Instant.now();
-		if (checkUserUniquenessPort.isNicknameInUse(nickname)
-				|| (nicknameHoldPort.isHeld(nickname, nicknameCheckedAt)
-						&& !nicknameHoldPort.isHeldBy(nickname, ownerKey, nicknameCheckedAt))) {
-			throw new AuthException(AuthErrorCode.NICKNAME_ALREADY_EXISTS);
-		}
+		String normalizedEmail = command.email().toLowerCase(Locale.ROOT);
+		SignupEmailProof proof = emailVerificationStorePort.loadProof(
+				EmailVerificationService.hash(normalizedEmail),
+				EmailVerificationService.hash(command.emailVerificationToken()))
+				.orElseThrow(() -> new EmailVerificationException(EmailVerificationFailure.VERIFICATION_INVALID));
 		requireSelectableFixedCharacter(command.fixedCharacterId());
 		User user = new User(
 				command.email(),
@@ -92,44 +132,57 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 				nickname,
 				command.fixedCharacterId());
 
+		NicknameReservationResult signupHold = null;
+		String signupOwnerKey = "signup:" + EmailVerificationService.hash(normalizedEmail);
 		try {
-			recordUserAccountPort.recordUserAccount(user);
+			String nicknameKey = nicknameIdentityPort.keyFor(nickname);
+			User signupUser = user;
+			SignupRegistration registration = nicknameWriteTransactionPort.execute(() -> {
+				if (checkUserUniquenessPort.isEmailRegistered(command.email())) {
+					throw new EmailAlreadyExistsException();
+				}
+				if (checkUserUniquenessPort.isNicknameInUse(nickname)
+						|| nicknameReservationStorePort.isReservedByOther(nicknameKey, signupOwnerKey)) {
+					throw new NicknameAlreadyExistsException(nickname.value());
+				}
+				NicknameReservationResult ownedHold = nicknameReservationStorePort.load(signupOwnerKey).orElse(null);
+				User saved = signUpTransactionPort.register(signupUser);
+				return new SignupRegistration(saved, ownedHold);
+			});
+			user = registration.user();
+			signupHold = registration.hold();
 		} catch (EmailAlreadyExistsException exception) {
 			throw new AuthException(AuthErrorCode.EMAIL_ALREADY_EXISTS);
 		} catch (NicknameAlreadyExistsException exception) {
 			throw new AuthException(AuthErrorCode.NICKNAME_ALREADY_EXISTS);
 		}
-		Instant consumedAt = Instant.now();
-		String consumptionFailure = verified.validateToken(consumedAt);
-		if (consumptionFailure != null) {
-			throw new EmailVerificationException(EmailVerificationFailure.valueOf(consumptionFailure));
+		if (signupHold != null) {
+			try {
+				nicknameReservationStorePort.releaseIfVersionMatches(
+						signupOwnerKey, signupHold.nicknameKey(), signupHold.version());
+			} catch (RuntimeException exception) {
+				log.error("event=signup_nickname_reservation_cleanup outcome=failed userId={} errorType={}",
+						user.getId(), exception.getClass().getSimpleName());
+			}
 		}
-		verified.consumeVerifiedEmail(consumedAt);
-		nicknameHoldPort.releaseForOwner(ownerKey);
+		try {
+			emailVerificationStorePort.removeProofIfVersionMatches(
+					EmailVerificationService.hash(normalizedEmail), proof.version());
+		} catch (RuntimeException exception) {
+			String errorType = exception.getClass().getSimpleName();
+			log.error("event=signup_verification_cleanup outcome=failed userId={} errorType={}",
+					user.getId(), errorType);
+			try {
+				verificationAlerts.signupProofCleanupFailed(errorType);
+			} catch (RuntimeException alertException) {
+				log.error("event=signup_verification_alert outcome=failed errorType={}",
+						alertException.getClass().getSimpleName());
+			}
+		}
 		log.info("event=user_signup outcome=success userId={}", user.getId());
 	}
 
-	@Override
-	@Transactional
-	public NicknameReservationResult reserveNickname(String rawNickname, String emailVerificationToken) {
-		Nickname nickname = new Nickname(rawNickname);
-		Verification verified = requireVerifiedEmail(emailVerificationToken);
-		nicknameHoldPort.lockNicknameWrites();
-		String ownerKey = emailOwnerKey(verified);
-		Instant now = Instant.now();
-		String failure = verified.validateToken(now);
-		if (failure != null) throw new EmailVerificationException(EmailVerificationFailure.valueOf(failure));
-		if (checkUserUniquenessPort.isNicknameInUse(nickname)
-				|| !nicknameHoldPort.tryAcquire(nickname, ownerKey, now)) {
-			throw new AuthException(AuthErrorCode.NICKNAME_ALREADY_EXISTS);
-		}
-		return new NicknameReservationResult(nickname.value(),
-				nicknameHoldPort.heldUntil(nickname, ownerKey, now).orElseThrow());
-	}
-
-	private String emailOwnerKey(Verification verified) {
-		return "email:" + verified.getEmailVerificationId();
-	}
+	private record SignupRegistration(User user, NicknameReservationResult hold) {}
 
 	@Override
 	@Transactional
@@ -178,20 +231,8 @@ public class AuthService implements SignUpUseCase, VerifyEmailUseCase, ResetPass
 
 		verified.markUsed();
 		recordCompletedEmailVerificationPort.recordCompletedVerification(verified);
-		user.updatePassword(passwordProtectionPort.protect(command.newPassword()));
-		recordUserAccountPort.recordUserAccount(user);
+		recordUserAccountPort.updatePasswordOnly(user.getId(), passwordProtectionPort.protect(command.newPassword()));
 		log.info("event=password_reset outcome=success userId={}", user.getId());
-	}
-
-	private Verification requireVerifiedEmail(String token) {
-		if (token == null || token.isBlank()) {
-			throw new EmailVerificationException(EmailVerificationFailure.TOKEN_INVALID);
-		}
-		Verification verified = emailVerificationStorePort.lockByTokenHash(EmailVerificationService.hash(token))
-				.orElseThrow(() -> new EmailVerificationException(EmailVerificationFailure.TOKEN_INVALID));
-		String failure = verified.validateToken(Instant.now());
-		if (failure != null) throw new EmailVerificationException(EmailVerificationFailure.valueOf(failure));
-		return verified;
 	}
 
 	private void saveVerificationCode(String email, String code, VerificationType type) {

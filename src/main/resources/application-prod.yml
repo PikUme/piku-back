@@ -16,4 +16,4 @@ spring:
 
 discord:
   webhook:
-    url: "${DISCORD_WEBHOOK_URL:discord_webhook_url}"
+    url: "${DISCORD_WEBHOOK_URL:}"

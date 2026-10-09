@@ -19,8 +19,11 @@ import com.pikume.back.user.adapter.in.web.UserExceptionHandler;
 import com.pikume.back.user.auth.application.port.in.ResetPasswordUseCase;
 import com.pikume.back.user.auth.application.port.in.SignUpUseCase;
 import com.pikume.back.user.auth.application.port.in.VerifyEmailUseCase;
+import com.pikume.back.user.auth.application.port.in.EmailVerificationUseCase;
 import com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase;
 import com.pikume.back.user.auth.application.dto.ResetPasswordCommand;
+import com.pikume.back.user.auth.application.dto.SignupEmailVerification;
+import com.pikume.back.user.auth.application.dto.SignupVerificationSent;
 import com.pikume.back.user.auth.application.dto.SignUpCommand;
 import com.pikume.back.user.auth.application.dto.VerifyEmailCommand;
 import com.pikume.back.user.auth.adapter.in.web.dto.request.SignupRequest;
@@ -29,11 +32,8 @@ import com.pikume.back.user.auth.application.exception.AuthException;
 import com.pikume.back.user.auth.domain.vo.VerificationType;
 
 import java.util.List;
-import com.pikume.back.user.auth.application.port.in.EmailVerificationUseCase;
-import com.pikume.back.user.auth.application.dto.SendEmailVerificationCommand;
-import com.pikume.back.user.auth.application.dto.EmailVerificationDelivery;
-import java.time.Instant;
 import java.util.Optional;
+import java.time.LocalDateTime;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
@@ -59,11 +59,13 @@ class AuthControllerTest {
 	private VerifyEmailUseCase verifyEmailUseCase;
 
 	@Mock
+	private EmailVerificationUseCase emailVerificationUseCase;
+
+	@Mock
 	private ResetPasswordUseCase resetPasswordUseCase;
 
 	@Mock
 	private QueryAllowedEmailUseCase queryAllowedEmailUseCase;
-	@Mock private EmailVerificationUseCase emailVerificationUseCase;
 
 	private MockMvc mockMvc;
 	private final ObjectMapper objectMapper = new ObjectMapper();
@@ -73,8 +75,9 @@ class AuthControllerTest {
 		authController = new AuthController(
 				signUpUseCase,
 				verifyEmailUseCase,
+				emailVerificationUseCase,
 				resetPasswordUseCase,
-				queryAllowedEmailUseCase, emailVerificationUseCase);
+				queryAllowedEmailUseCase);
 		ProblemDetailFactory problemDetailFactory = new ProblemDetailFactory();
 		LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
 		validator.afterPropertiesSet();
@@ -90,26 +93,34 @@ class AuthControllerTest {
 	@Test
 	@DisplayName("POST /api/auth/send-verification/sign-up은 기존 성공 메시지를 반환한다")
 	void sendSignUpVerificationEmailReturnsMessageResponse() throws Exception {
-		given(emailVerificationUseCase.sendEmailCode(any())).willReturn(new EmailVerificationDelivery(Instant.now().plusSeconds(300), Instant.now().plusSeconds(60)));
+		given(emailVerificationUseCase.sendSignUpVerificationEmail("user@example.com"))
+				.willReturn(new SignupVerificationSent(LocalDateTime.of(2026, 10, 4, 12, 5),
+						LocalDateTime.of(2026, 10, 4, 12, 1)));
 		mockMvc.perform(post("/api/auth/send-verification/sign-up")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"email\":\"user@example.com\"}"))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.message").value("회원가입 인증 이메일이 발송되었습니다."));
+				.andExpect(jsonPath("$.message").value("회원가입 인증 이메일이 발송되었습니다."))
+				.andExpect(jsonPath("$.expiresAt").value("2026-10-04T12:05:00"))
+				.andExpect(jsonPath("$.resendAvailableAt").value("2026-10-04T12:01:00"))
+				.andExpect(jsonPath("$.emailVerificationToken").doesNotExist())
+				.andExpect(jsonPath("$.token").doesNotExist());
 
-		then(emailVerificationUseCase).should().sendEmailCode(new SendEmailVerificationCommand("user@example.com", "127.0.0.1"));
+		then(emailVerificationUseCase).should().sendSignUpVerificationEmail("user@example.com");
 	}
 
 	@Test
 	@DisplayName("POST /api/auth/send-verification/sign-up은 비어 있지 않은 이메일을 Use Case에 위임한다")
 	void sendSignUpVerificationDelegatesNonBlankEmail() throws Exception {
-		given(emailVerificationUseCase.sendEmailCode(any())).willReturn(new EmailVerificationDelivery(Instant.now().plusSeconds(300), Instant.now().plusSeconds(60)));
+		given(emailVerificationUseCase.sendSignUpVerificationEmail("not-an-email"))
+				.willReturn(new SignupVerificationSent(LocalDateTime.now().plusMinutes(5),
+						LocalDateTime.now().plusMinutes(1)));
 		mockMvc.perform(post("/api/auth/send-verification/sign-up")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"email\":\"not-an-email\"}"))
 				.andExpect(status().isOk());
 
-		then(emailVerificationUseCase).should().sendEmailCode(new SendEmailVerificationCommand("not-an-email", "127.0.0.1"));
+		then(emailVerificationUseCase).should().sendSignUpVerificationEmail("not-an-email");
 	}
 
 	@Test
@@ -122,7 +133,7 @@ class AuthControllerTest {
 				.andExpect(jsonPath("$.status").value(400))
 				.andExpect(jsonPath("$.fieldErrors.email").exists());
 
-		then(verifyEmailUseCase).shouldHaveNoInteractions();
+		then(emailVerificationUseCase).shouldHaveNoInteractions();
 	}
 
 	@Test
@@ -151,13 +162,19 @@ class AuthControllerTest {
 	@Test
 	@DisplayName("POST /api/auth/verify-code는 기존 성공 메시지를 반환한다")
 	void verifyCodeReturnsMessageResponse() throws Exception {
+		given(emailVerificationUseCase.verifySignUpVerificationCode("user@example.com", "123456"))
+				.willReturn(new SignupEmailVerification("signup-proof-token", LocalDateTime.of(2026, 10, 4, 12, 0)));
 		mockMvc.perform(post("/api/auth/verify-code")
 						.contentType(MediaType.APPLICATION_JSON)
-						.content("{\"email\":\"user@example.com\",\"code\":\"123456\",\"type\":\"PASSWORD_RESET\"}"))
+						.content("{\"email\":\"user@example.com\",\"code\":\"123456\",\"type\":\"SIGN_UP\"}"))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.message").value("이메일 인증이 완료되었습니다."));
+				.andExpect(jsonPath("$.message").value("이메일 인증이 완료되었습니다."))
+				.andExpect(jsonPath("$.emailVerificationToken").value("signup-proof-token"))
+				.andExpect(jsonPath("$.expiresAt").value("2026-10-04T12:00:00"))
+				.andExpect(jsonPath("$.token").doesNotExist())
+				.andExpect(jsonPath("$.resendAvailableAt").doesNotExist());
 
-		then(verifyEmailUseCase).should().verifyCode(any());
+		then(emailVerificationUseCase).should().verifySignUpVerificationCode("user@example.com", "123456");
 	}
 
 	@Test
@@ -177,13 +194,26 @@ class AuthControllerTest {
 	@Test
 	@DisplayName("POST /api/auth/verify-code는 비어 있지 않은 이메일을 Use Case에 위임한다")
 	void verifyCodeDelegatesNonBlankEmail() throws Exception {
+		given(emailVerificationUseCase.verifySignUpVerificationCode("user!tag@example.com", "123456"))
+				.willReturn(new SignupEmailVerification("signup-proof-token", LocalDateTime.now().plusMinutes(10)));
 		mockMvc.perform(post("/api/auth/verify-code")
 						.contentType(MediaType.APPLICATION_JSON)
-						.content("{\"email\":\"user!tag@example.com\",\"code\":\"123456\",\"type\":\"PASSWORD_RESET\"}"))
+						.content("{\"email\":\"user!tag@example.com\",\"code\":\"123456\",\"type\":\"SIGN_UP\"}"))
+				.andExpect(status().isOk());
+
+		then(emailVerificationUseCase).should().verifySignUpVerificationCode("user!tag@example.com", "123456");
+	}
+
+	@Test
+	@DisplayName("POST /api/auth/verify-code는 비밀번호 재설정 코드를 MySQL 유스케이스에 위임한다")
+	void verifyPasswordResetCodeUsesExistingUseCase() throws Exception {
+		mockMvc.perform(post("/api/auth/verify-code")
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("{\"email\":\"user@example.com\",\"code\":\"123456\",\"type\":\"PASSWORD_RESET\"}"))
 				.andExpect(status().isOk());
 
 		then(verifyEmailUseCase).should().verifyCode(
-				new VerifyEmailCommand("user!tag@example.com", "123456", VerificationType.PASSWORD_RESET));
+				new VerifyEmailCommand("user@example.com", "123456", VerificationType.PASSWORD_RESET));
 	}
 
 	@Test
@@ -259,7 +289,7 @@ class AuthControllerTest {
 	@Test
 	@DisplayName("POST /api/auth/signup은 성공 시 MessageResponse를 반환한다")
 	void signupReturnsMessageResponseWhenSuccessful() throws Exception {
-		SignupRequest request = new SignupRequest("user@example.com", "abc@123", "pikume", 1L, "test-token");
+		SignupRequest request = new SignupRequest("user@example.com", "abc@123", "pikume", 1L, "signup-proof-token");
 		doNothing().when(signUpUseCase).signUp(any(SignUpCommand.class));
 
 		mockMvc.perform(post("/api/auth/signup")
@@ -272,7 +302,7 @@ class AuthControllerTest {
 	@Test
 	@DisplayName("POST /api/auth/signup은 비어 있지 않은 이메일을 Use Case에 위임한다")
 	void signupDelegatesNonBlankEmail() throws Exception {
-		SignupRequest request = new SignupRequest("PRIVATE-INVALID-EMAIL", "abc@123", "pikume", 1L, "test-token");
+		SignupRequest request = new SignupRequest("PRIVATE-INVALID-EMAIL", "abc@123", "pikume", 1L, "signup-proof-token");
 
 		mockMvc.perform(post("/api/auth/signup")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -280,13 +310,13 @@ class AuthControllerTest {
 				.andExpect(status().isCreated());
 
 		then(signUpUseCase).should().signUp(
-				new SignUpCommand("PRIVATE-INVALID-EMAIL", "abc@123", "pikume", 1L, "test-token"));
+				new SignUpCommand("PRIVATE-INVALID-EMAIL", "abc@123", "pikume", 1L, "signup-proof-token"));
 	}
 
 	@Test
 	@DisplayName("POST /api/auth/signup은 빈 이메일을 validation Problem Details로 거부한다")
 	void signupRejectsBlankEmail() throws Exception {
-		SignupRequest request = new SignupRequest("", "abc@123", "pikume", 1L, "test-token");
+		SignupRequest request = new SignupRequest("", "abc@123", "pikume", 1L, "signup-proof-token");
 
 		mockMvc.perform(post("/api/auth/signup")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -299,9 +329,22 @@ class AuthControllerTest {
 	}
 
 	@Test
+	@DisplayName("POST /api/auth/signup은 이메일 인증 토큰이 없으면 validation Problem Details로 거부한다")
+	void signupRejectsMissingEmailVerificationToken() throws Exception {
+		mockMvc.perform(post("/api/auth/signup")
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("{\"email\":\"user@example.com\",\"password\":\"abc@123\",\"nickname\":\"pikume\",\"fixedCharacterId\":1}"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.status").value(400))
+				.andExpect(jsonPath("$.fieldErrors.emailVerificationToken").exists());
+
+		then(signUpUseCase).shouldHaveNoInteractions();
+	}
+
+	@Test
 	@DisplayName("POST /api/auth/signup은 빈 비밀번호를 validation Problem Details로 거부한다")
 	void signupRejectsBlankPassword() throws Exception {
-		SignupRequest request = new SignupRequest("user@example.com", "", "pikume", 1L, "test-token");
+		SignupRequest request = new SignupRequest("user@example.com", "", "pikume", 1L, "signup-proof-token");
 
 		mockMvc.perform(post("/api/auth/signup")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -316,7 +359,7 @@ class AuthControllerTest {
 	@Test
 	@DisplayName("POST /api/auth/signup은 비어 있지 않은 비밀번호를 Use Case에 위임한다")
 	void signupDelegatesNonBlankPassword() throws Exception {
-		SignupRequest request = new SignupRequest("user@example.com", "plainPassword", "pikume", 1L, "test-token");
+		SignupRequest request = new SignupRequest("user@example.com", "plainPassword", "pikume", 1L, "signup-proof-token");
 
 		mockMvc.perform(post("/api/auth/signup")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -324,13 +367,13 @@ class AuthControllerTest {
 				.andExpect(status().isCreated());
 
 		then(signUpUseCase).should().signUp(
-				new SignUpCommand("user@example.com", "plainPassword", "pikume", 1L, "test-token"));
+				new SignUpCommand("user@example.com", "plainPassword", "pikume", 1L, "signup-proof-token"));
 	}
 
 	@Test
 	@DisplayName("POST /api/auth/signup은 닉네임 원문의 길이 검증을 Use Case에 위임한다")
 	void signupDelegatesRawNicknameValidation() throws Exception {
-		SignupRequest request = new SignupRequest("user@example.com", "abc@123", " 12345678901234567890 ", 1L, "test-token");
+		SignupRequest request = new SignupRequest("user@example.com", "abc@123", " 12345678901234567890 ", 1L, "signup-proof-token");
 
 		mockMvc.perform(post("/api/auth/signup")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -338,13 +381,13 @@ class AuthControllerTest {
 				.andExpect(status().isCreated());
 
 		then(signUpUseCase).should().signUp(
-				new SignUpCommand("user@example.com", "abc@123", " 12345678901234567890 ", 1L, "test-token"));
+				new SignUpCommand("user@example.com", "abc@123", " 12345678901234567890 ", 1L, "signup-proof-token"));
 	}
 
 	@Test
 	@DisplayName("POST /api/auth/signup은 AuthException 발생 시 Problem Details를 반환한다")
 	void signupReturnsProblemDetailWhenAuthExceptionOccurs() throws Exception {
-		SignupRequest request = new SignupRequest("user@example.com", "abc@123", "pikume", 1L, "test-token");
+		SignupRequest request = new SignupRequest("user@example.com", "abc@123", "pikume", 1L, "signup-proof-token");
 		willThrow(new AuthException(AuthErrorCode.EMAIL_ALREADY_EXISTS))
 				.given(signUpUseCase)
 				.signUp(any(SignUpCommand.class));
@@ -363,7 +406,7 @@ class AuthControllerTest {
 	@Test
 	@DisplayName("POST /api/auth/signup은 Application 이메일 정책 오류를 전용 Problem Details로 반환한다")
 	void signupReturnsInvalidEmailProblemDetail() throws Exception {
-		SignupRequest request = new SignupRequest("user@example.com", "abc@123", "pikume", 1L, "test-token");
+		SignupRequest request = new SignupRequest("user@example.com", "abc@123", "pikume", 1L, "signup-proof-token");
 		willThrow(new AuthException(AuthErrorCode.INVALID_EMAIL))
 				.given(signUpUseCase)
 				.signUp(any(SignUpCommand.class));
@@ -381,7 +424,7 @@ class AuthControllerTest {
 	@Test
 	@DisplayName("POST /api/auth/signup은 Application 비밀번호 정책 오류를 전용 Problem Details로 반환한다")
 	void signupReturnsInvalidPasswordProblemDetail() throws Exception {
-		SignupRequest request = new SignupRequest("user@example.com", "abc@123", "pikume", 1L, "test-token");
+		SignupRequest request = new SignupRequest("user@example.com", "abc@123", "pikume", 1L, "signup-proof-token");
 		willThrow(new AuthException(AuthErrorCode.INVALID_PASSWORD))
 				.given(signUpUseCase)
 				.signUp(any(SignUpCommand.class));
@@ -399,7 +442,7 @@ class AuthControllerTest {
 	@Test
 	@DisplayName("POST /api/auth/signup은 존재하지 않는 고정 캐릭터면 Problem Details를 반환한다")
 	void signupReturnsProblemDetailWhenFixedCharacterNotFound() throws Exception {
-		SignupRequest request = new SignupRequest("user@example.com", "abc@123", "pikume", 999L, "test-token");
+		SignupRequest request = new SignupRequest("user@example.com", "abc@123", "pikume", 999L, "signup-proof-token");
 		willThrow(new AuthException(AuthErrorCode.FIXED_CHARACTER_NOT_FOUND))
 				.given(signUpUseCase)
 				.signUp(any(SignUpCommand.class));

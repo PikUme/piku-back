@@ -1,25 +1,20 @@
 package com.pikume.back.user.application.port.out;
 
 import com.pikume.back.user.domain.vo.Nickname;
-import java.time.Instant;
+import com.pikume.back.user.application.dto.NicknameHoldSnapshot;
 import java.util.Optional;
+
+import java.time.Instant;
 
 public interface NicknameHoldPort {
 
-	/** Serialize nickname availability, reservations, and account writes until transaction completion.
-	 * Acquire after an email verification row, and before user rows or nickname availability reads.
-	 * Owners are user IDs for members and email:{verification UUID} for guests. */
-	void lockNicknameWrites();
+	boolean tryAcquire(Nickname nickname, String userId, Instant requestedAt);
 
-	boolean tryAcquire(Nickname nickname, String ownerKey, Instant requestedAt);
+	boolean isHeldBy(Nickname nickname, String userId, Instant checkedAt);
 
-	boolean isHeldBy(Nickname nickname, String ownerKey, Instant checkedAt);
+	void release(Nickname nickname, String userId);
 
-	boolean isHeld(Nickname nickname, Instant checkedAt);
+	Optional<NicknameHoldSnapshot> loadForOwner(String userId);
 
-	Optional<Instant> heldUntil(Nickname nickname, String ownerKey, Instant checkedAt);
-
-	void release(Nickname nickname, String ownerKey);
-
-	void releaseForOwner(String ownerKey);
+	boolean releaseIfVersionMatches(String userId, NicknameHoldSnapshot hold);
 }

@@ -1,9 +1,11 @@
 package com.pikume.back.user.auth.application.port.in;
 
-import com.pikume.back.user.auth.application.dto.*;
+import com.pikume.back.user.auth.application.dto.SignupEmailVerification;
+import com.pikume.back.user.auth.application.dto.SignupVerificationSent;
 
 public interface EmailVerificationUseCase {
-    EmailVerificationDelivery sendEmailCode(SendEmailVerificationCommand command);
-    EmailVerificationResult verifyEmailCode(VerifyEmailCodeCommand command);
-    void purgeExpiredVerifications();
+
+	SignupVerificationSent sendSignUpVerificationEmail(String email);
+
+	SignupEmailVerification verifySignUpVerificationCode(String email, String code);
 }

@@ -4,38 +4,38 @@ import com.pikume.back.global.error.ProblemDetailFactory;
 import com.pikume.back.global.exception.GlobalExceptionHandler;
 import com.pikume.back.global.port.out.ResolveObjectUrlPort;
 import com.pikume.back.security.principal.UserPrincipal;
-import com.pikume.back.user.adapter.out.persistence.NicknameHoldPersistenceAdapter;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
-import org.springframework.transaction.TransactionStatus;
-import org.springframework.transaction.support.DefaultTransactionDefinition;
-import org.junit.jupiter.api.AfterEach;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doAnswer;
+import com.pikume.back.user.adapter.out.memory.InMemoryNicknameHoldAdapter;
 import com.pikume.back.user.application.port.in.QueryUserProfileUseCase;
 import com.pikume.back.user.application.port.out.CheckUserUniquenessPort;
 import com.pikume.back.user.application.port.out.LoadUserForPasswordResetPort;
 import com.pikume.back.user.application.port.out.LoadUserForProfilePort;
 import com.pikume.back.user.application.port.out.RecordUserAccountPort;
+import com.pikume.back.user.application.port.out.NicknameReservationStorePort;
+import com.pikume.back.user.application.port.out.NicknameIdentityPort;
+import com.pikume.back.user.application.port.out.NicknameWriteTransactionPort;
 import com.pikume.back.user.application.port.out.ResolveFixedCharacterAvatarPort;
 import com.pikume.back.user.application.service.UserProfileCommandService;
 import com.pikume.back.user.auth.adapter.in.web.AuthController;
 import com.pikume.back.user.auth.adapter.in.web.AuthExceptionHandler;
 import com.pikume.back.user.auth.application.port.in.QueryAllowedEmailUseCase;
+import com.pikume.back.user.auth.application.port.in.EmailVerificationUseCase;
 import com.pikume.back.user.auth.application.port.out.CheckSignUpCharacterSelectionPort;
+import com.pikume.back.user.auth.application.port.out.EmailVerificationOperationsAlertPort;
+import com.pikume.back.user.auth.application.port.out.EmailVerificationStorePort;
 import com.pikume.back.user.auth.application.port.out.IssueVerificationEmailPort;
 import com.pikume.back.user.auth.application.port.out.LoadCompletedEmailVerificationPort;
 import com.pikume.back.user.auth.application.port.out.LoadVerificationPort;
 import com.pikume.back.user.auth.application.port.out.ManageVerificationPort;
 import com.pikume.back.user.auth.application.port.out.PasswordProtectionPort;
 import com.pikume.back.user.auth.application.port.out.RecordCompletedEmailVerificationPort;
+import com.pikume.back.user.auth.application.port.out.SignUpTransactionPort;
+import com.pikume.back.user.auth.application.dto.SignupEmailProof;
 import com.pikume.back.user.auth.application.service.AuthService;
-import com.pikume.back.user.auth.domain.VerifiedEmail;
+import com.pikume.back.user.auth.application.service.EmailVerificationService;
 import com.pikume.back.user.auth.domain.service.EmailVerificationPolicy;
-import com.pikume.back.user.auth.domain.vo.VerificationType;
 import com.pikume.back.user.domain.User;
 import com.pikume.back.user.domain.exception.NicknameAlreadyExistsException;
+import com.pikume.back.user.domain.service.NicknamePolicy;
 import com.pikume.back.user.domain.service.PasswordPolicy;
 import com.pikume.back.user.domain.vo.Nickname;
 import jakarta.validation.constraints.NotNull;
@@ -46,7 +46,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -61,10 +60,7 @@ import org.springframework.web.method.support.ModelAndViewContainer;
 
 import java.util.HashSet;
 import java.util.Optional;
-import com.pikume.back.user.auth.application.port.out.EmailVerificationStorePort;
-import com.pikume.back.user.auth.application.port.in.EmailVerificationUseCase;
-import com.pikume.back.user.auth.domain.Verification;
-import com.pikume.back.user.auth.application.service.EmailVerificationService;
+import java.time.LocalDateTime;
 import java.util.Set;
 import java.util.stream.Stream;
 
@@ -80,6 +76,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @DisplayName("닉네임 Web 계약")
 class NicknameWebContractTest {
+	private static final String SIGNUP_TOKEN = "signup-proof-token";
 
 	private static final String USER_ID = "user-1";
 	private static final String VALIDATION_TYPE =
@@ -87,11 +84,7 @@ class NicknameWebContractTest {
 
 	private MockMvc mockMvc;
 	private TestUserAccountStore userAccountStore;
-	private NicknameHoldPersistenceAdapter nicknameHoldAdapter;
-	private DataSourceTransactionManager transactionManager;
-	private TransactionStatus transaction;
-	private JdbcTemplate jdbc;
-	private LoadCompletedEmailVerificationPort loadCompletedEmailVerificationPort;
+	private InMemoryNicknameHoldAdapter nicknameHoldAdapter;
 	private EmailVerificationStorePort emailVerificationStorePort;
 	private CheckSignUpCharacterSelectionPort checkSignUpCharacterSelectionPort;
 	private PasswordProtectionPort passwordProtectionPort;
@@ -101,15 +94,7 @@ class NicknameWebContractTest {
 	@BeforeEach
 	void setUp() {
 		userAccountStore = new TestUserAccountStore();
-		var source = new DriverManagerDataSource("jdbc:h2:mem:" + java.util.UUID.randomUUID() + ";DB_CLOSE_DELAY=-1", "sa", "");
-		jdbc = new JdbcTemplate(source);
-		jdbc.execute("CREATE TABLE nickname_write_mutex (id INT PRIMARY KEY)");
-		jdbc.update("INSERT INTO nickname_write_mutex VALUES (1)");
-		jdbc.execute("CREATE TABLE nickname_holds (nickname VARCHAR(255) PRIMARY KEY, owner_key VARCHAR(64) NOT NULL UNIQUE, expires_at TIMESTAMP(6) NOT NULL)");
-		transactionManager = new DataSourceTransactionManager(source);
-		transaction = transactionManager.getTransaction(new DefaultTransactionDefinition());
-		nicknameHoldAdapter = new NicknameHoldPersistenceAdapter(jdbc);
-		loadCompletedEmailVerificationPort = mock(LoadCompletedEmailVerificationPort.class);
+		nicknameHoldAdapter = new InMemoryNicknameHoldAdapter(new NicknamePolicy());
 		emailVerificationStorePort = mock(EmailVerificationStorePort.class);
 		checkSignUpCharacterSelectionPort = mock(CheckSignUpCharacterSelectionPort.class);
 		passwordProtectionPort = mock(PasswordProtectionPort.class);
@@ -117,33 +102,56 @@ class NicknameWebContractTest {
 		resolveObjectUrlPort = mock(ResolveObjectUrlPort.class);
 
 		QueryAllowedEmailUseCase queryAllowedEmailUseCase = mock(QueryAllowedEmailUseCase.class);
+		SignUpTransactionPort signUpTransactionPort = userAccountStore::recordUserAccount;
+		NicknameReservationStorePort reservationStore = mock(NicknameReservationStorePort.class);
+		given(reservationStore.isReservedByOther(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+				.willReturn(false);
+		given(reservationStore.load(org.mockito.ArgumentMatchers.any())).willReturn(Optional.empty());
 		AuthService authService = new AuthService(
 				mock(LoadUserForPasswordResetPort.class),
 				userAccountStore,
 				userAccountStore,
 				mock(LoadVerificationPort.class),
 				mock(ManageVerificationPort.class),
-				loadCompletedEmailVerificationPort,
+				mock(LoadCompletedEmailVerificationPort.class),
 				mock(RecordCompletedEmailVerificationPort.class),
 				mock(IssueVerificationEmailPort.class),
 				passwordProtectionPort,
 				checkSignUpCharacterSelectionPort,
-				emailVerificationStorePort,
 				new EmailVerificationPolicy(),
-				new PasswordPolicy(), nicknameHoldAdapter);
+				new PasswordPolicy(),
+				emailVerificationStorePort,
+				mock(EmailVerificationOperationsAlertPort.class),
+				signUpTransactionPort,
+				new NicknameWriteTransactionPort() {
+					@Override
+					public <T> T execute(java.util.function.Supplier<T> operation) {
+						return operation.get();
+					}
+				},
+				nickname -> nickname.value().toLowerCase(java.util.Locale.ROOT),
+				reservationStore);
 		UserProfileCommandService profileService = new UserProfileCommandService(
 				userAccountStore,
 				userAccountStore,
 				userAccountStore,
 				fixedCharacterAvatarPort,
-				nicknameHoldAdapter);
+				nicknameHoldAdapter,
+				new com.pikume.back.user.application.port.out.NicknameWriteTransactionPort() {
+					@Override
+					public <T> T execute(java.util.function.Supplier<T> operation) {
+						return operation.get();
+					}
+				},
+				nickname -> nickname.value());
 
 		ProblemDetailFactory problemDetailFactory = new ProblemDetailFactory();
 		AuthController authController = new AuthController(
 				authService,
 				authService,
+				mock(EmailVerificationUseCase.class),
 				authService,
-				queryAllowedEmailUseCase, mock(EmailVerificationUseCase.class));
+				queryAllowedEmailUseCase);
 		UserController userController = new UserController(
 				mock(QueryUserProfileUseCase.class),
 				profileService,
@@ -162,31 +170,25 @@ class NicknameWebContractTest {
 				.build();
 	}
 
-	@AfterEach void closeDatabase() {
-		transactionManager.rollback(transaction);
-		jdbc.execute("SET DB_CLOSE_DELAY 0");
-	}
-
 	@Nested
 	@DisplayName("POST /api/auth/signup")
 	class Signup {
 
-		@ParameterizedTest
-		@ValueSource(strings = {"12345678901234567890", "가입대기_user"})
-		@DisplayName("닉네임을 정규화하고 일반 길이 규칙에 맞으면 가입한다")
-		void acceptsValidNormalizedNicknames(String nickname) throws Exception {
+		@Test
+		@DisplayName("원문은 20자를 초과해도 정규화한 20자 닉네임으로 가입한다")
+		void acceptsRawNicknameLongerThanTwentyWhenNormalizedLengthIsTwenty() throws Exception {
 			prepareSignup("user@example.com");
 
 			mockMvc.perform(post("/api/auth/signup")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
-								{"email":"user@example.com","password":"abc@123","nickname":" %s ","fixedCharacterId":1,"emailVerificationToken":"test-token"}
-								""".formatted(nickname)))
+								{"email":"user@example.com","password":"abc@123","nickname":" 12345678901234567890 ","fixedCharacterId":1,"emailVerificationToken":"signup-proof-token"}
+								"""))
 					.andExpect(status().isCreated())
 					.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
 					.andExpect(jsonPath("$.message").value("회원가입 성공"));
 
-			assertThat(userAccountStore.lastSignedUpUser().getNickname()).isEqualTo(nickname);
+			assertThat(userAccountStore.lastSignedUpUser().getNickname()).isEqualTo("12345678901234567890");
 		}
 
 		@ParameterizedTest(name = "{0}")
@@ -196,7 +198,7 @@ class NicknameWebContractTest {
 			ResultActions result = mockMvc.perform(post("/api/auth/signup")
 					.contentType(MediaType.APPLICATION_JSON)
 					.content("""
-							{"email":"user@example.com","password":"abc@123","nickname":"%s","fixedCharacterId":1,"emailVerificationToken":"test-token"}
+							{"email":"user@example.com","password":"abc@123","nickname":"%s","fixedCharacterId":1,"emailVerificationToken":"signup-proof-token"}
 							""".formatted(nickname)));
 
 			assertValidationProblem(result, detail, "/api/auth/signup");
@@ -208,7 +210,7 @@ class NicknameWebContractTest {
 			ResultActions result = mockMvc.perform(post("/api/auth/signup")
 					.contentType(MediaType.APPLICATION_JSON)
 					.content("""
-							{"email":"user@example.com","password":"abc@123","fixedCharacterId":1,"emailVerificationToken":"test-token"}
+							{"email":"user@example.com","password":"abc@123","fixedCharacterId":1,"emailVerificationToken":"signup-proof-token"}
 							"""));
 
 			assertValidationProblem(result, "닉네임은 필수 값입니다.", "/api/auth/signup");
@@ -223,7 +225,7 @@ class NicknameWebContractTest {
 			mockMvc.perform(post("/api/auth/signup")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
-								{"email":"user@example.com","password":"abc@123","nickname":" 중복닉 ","fixedCharacterId":1,"emailVerificationToken":"test-token"}
+								{"email":"user@example.com","password":"abc@123","nickname":" 중복닉 ","fixedCharacterId":1,"emailVerificationToken":"signup-proof-token"}
 								"""))
 					.andExpect(status().isConflict())
 					.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
@@ -343,12 +345,11 @@ class NicknameWebContractTest {
 			assertThat(userAccountStore.profileUser().getCharacterId()).isEqualTo(2L);
 		}
 
-		@ParameterizedTest
-		@ValueSource(strings = {"새닉", "가입대기_user"})
+		@Test
 		@DisplayName("공백 형태가 다른 예약과 변경을 같은 닉네임으로 처리한다")
-		void usesNormalizedNicknameAcrossReservationAndUpdate(String nickname) throws Exception {
+		void usesNormalizedNicknameAcrossReservationAndUpdate() throws Exception {
 			mockMvc.perform(get("/api/users/nickname/availability")
-						.param("nickname", "  " + nickname + "　 "))
+						.param("nickname", "  새닉　 "))
 					.andExpect(status().isOk())
 					.andExpect(jsonPath("$.success").value(true))
 					.andExpect(jsonPath("$.message").value("사용 가능한 닉네임입니다."));
@@ -356,15 +357,15 @@ class NicknameWebContractTest {
 			mockMvc.perform(patch("/api/users/profile")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
-								{"newNickname":"\\t%s\\n","characterId":null}
-								""".formatted(nickname)))
+								{"newNickname":"\\t새닉\\n","characterId":null}
+								"""))
 					.andExpect(status().isOk())
 					.andExpect(jsonPath("$.success").value(true))
 					.andExpect(jsonPath("$.message").value("닉네임이 성공적으로 변경되었습니다."))
-					.andExpect(jsonPath("$.newNickname").value(nickname))
+					.andExpect(jsonPath("$.newNickname").value("새닉"))
 					.andExpect(jsonPath("$.avatar").doesNotExist());
 
-			assertThat(userAccountStore.profileUser().getNickname()).isEqualTo(nickname);
+			assertThat(userAccountStore.profileUser().getNickname()).isEqualTo("새닉");
 		}
 
 		@Test
@@ -417,11 +418,10 @@ class NicknameWebContractTest {
 	}
 
 	private void prepareSignup(String email) {
-		var now = java.time.Instant.now();
-		var verification = Verification.emailVerification("test-id", email, now, 60);
-		verification.activateCode("123456", now);
-		verification.verify(EmailVerificationService.hash("test-token"), now);
-		given(emailVerificationStorePort.lockByTokenHash(EmailVerificationService.hash("test-token"))).willReturn(Optional.of(verification));
+		given(emailVerificationStorePort.loadProof(EmailVerificationService.hash(email),
+				EmailVerificationService.hash(SIGNUP_TOKEN)))
+				.willReturn(Optional.of(new SignupEmailProof("proof-version",
+						EmailVerificationService.hash(SIGNUP_TOKEN), LocalDateTime.now().plusMinutes(10))));
 		given(checkSignUpCharacterSelectionPort.isSelectableFixedCharacter(1L)).willReturn(true);
 		given(passwordProtectionPort.protect("abc@123")).willReturn("encoded-password");
 	}
@@ -465,9 +465,6 @@ class NicknameWebContractTest {
 		public Optional<User> loadProfileUser(String userId) {
 			return USER_ID.equals(userId) ? Optional.of(profileUser) : Optional.empty();
 		}
-
-		@Override
-		public Optional<User> loadProfileUserForUpdate(String userId) { return loadProfileUser(userId); }
 
 		@Override
 		public User recordUserAccount(User user) {
