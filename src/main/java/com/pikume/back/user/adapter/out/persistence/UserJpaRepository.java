@@ -66,4 +66,18 @@ public interface UserJpaRepository extends JpaRepository<User, String> {
 	@Transactional
 	@Query(value = "UPDATE users SET password = :passwordHash, updated_at = CURRENT_TIMESTAMP(6) WHERE id = :userId", nativeQuery = true)
 	int updatePasswordOnly(@Param("userId") String userId, @Param("passwordHash") String passwordHash);
+
+	@Modifying
+	@Transactional
+	@Query(value = """
+			UPDATE users
+			SET nickname = COALESCE(:nickname, nickname),
+			    character_id = COALESCE(:characterId, character_id),
+			    updated_at = CURRENT_TIMESTAMP(6)
+			WHERE id = :userId
+			""", nativeQuery = true)
+	int updateProfileFields(
+			@Param("userId") String userId,
+			@Param("nickname") String nickname,
+			@Param("characterId") Long characterId);
 }

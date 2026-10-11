@@ -11,7 +11,6 @@ import com.pikume.back.user.adapter.out.persistence.UserAccountPersistenceAdapte
 import com.pikume.back.user.adapter.out.persistence.UserJpaRepository;
 import com.pikume.back.user.adapter.out.persistence.UserPersistenceAdapter;
 import com.pikume.back.user.adapter.out.persistence.MySqlNicknameIdentityAdapter;
-import com.pikume.back.user.adapter.out.persistence.MySqlNicknameWriteTransactionAdapter;
 import com.pikume.back.user.adapter.out.cache.RedisNicknameReservationAdapter;
 import com.pikume.back.user.adapter.out.cache.RedisNicknameHoldAdapter;
 import com.pikume.back.user.application.port.out.CheckUserUniquenessPort;
@@ -22,7 +21,6 @@ import com.pikume.back.user.application.port.out.NicknameHoldPort;
 import com.pikume.back.user.application.service.UserProfileCommandService;
 import com.pikume.back.user.application.port.out.ResolveFixedCharacterAvatarPort;
 import com.pikume.back.user.domain.vo.Nickname;
-import com.pikume.back.user.application.exception.NicknameReservationConflictException;
 import com.pikume.back.user.auth.adapter.out.cache.RedisEmailVerificationAdapter;
 import com.pikume.back.user.auth.application.exception.AuthException;
 import com.pikume.back.user.auth.application.port.out.CheckSignUpCharacterSelectionPort;
@@ -35,6 +33,7 @@ import com.pikume.back.user.auth.application.port.out.ManageVerificationPort;
 import com.pikume.back.user.auth.application.port.out.PasswordProtectionPort;
 import com.pikume.back.user.auth.application.port.out.RecordCompletedEmailVerificationPort;
 import com.pikume.back.user.auth.application.port.out.SignUpTransactionPort;
+import com.pikume.back.user.auth.adapter.out.persistence.SignUpTransactionAdapter;
 import com.pikume.back.user.auth.application.service.AuthService;
 import com.pikume.back.user.auth.application.service.EmailVerificationService;
 import com.pikume.back.user.auth.domain.service.EmailVerificationPolicy;
@@ -49,6 +48,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.time.LocalDateTime;
 import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -133,23 +133,11 @@ class SignUpRedisMySqlIntegrationTest {
 	@BeforeEach
 	void clearDatabase() {
 		users.deleteAllInBatch();
-		jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS nickname_write_mutex (id TINYINT NOT NULL PRIMARY KEY)");
-		jdbcTemplate.update("INSERT IGNORE INTO nickname_write_mutex (id) VALUES (1)");
 	}
 
 	@AfterEach
 	void clearRedis() {
 		redis.getConnectionFactory().getConnection().serverCommands().flushDb();
-	}
-
-	@Test
-	void preservesNicknameConflictThroughTheMySqlWriteTransaction() {
-		MySqlNicknameWriteTransactionAdapter writeTransaction =
-				new MySqlNicknameWriteTransactionAdapter(jdbcTemplate, transactionManager);
-
-		assertThatThrownBy(() -> writeTransaction.execute(() -> {
-			throw new NicknameReservationConflictException();
-		})).isInstanceOf(NicknameReservationConflictException.class);
 	}
 
 	@Test
@@ -205,10 +193,18 @@ class SignUpRedisMySqlIntegrationTest {
 		NicknameReservationStorePort reservations = new RedisNicknameReservationAdapter(redis);
 		String owner = "signup:" + EmailVerificationService.hash(email);
 		NicknameReservationResult existing = reservations.reserve(owner, "hold-key", "Hold A");
-		SignUpTransactionPort insertThenFail = user -> {
-			transactions.register(user);
-			throw new IllegalStateException("forced failure after MySQL insert");
-		};
+		SignUpTransactionPort insertThenFail = new SignUpTransactionAdapter(new RecordUserAccountPort() {
+			@Override
+			public User recordUserAccount(User user) {
+				userPersistence.recordUserAccount(user);
+				throw new IllegalStateException("forced failure after MySQL insert");
+			}
+
+			@Override
+			public void updateProfileFields(String userId, String nickname, Long characterId) {
+				throw new UnsupportedOperationException();
+			}
+		}, transactionManager);
 
 		assertThatThrownBy(() -> authService(proofStore, mock(EmailVerificationOperationsAlertPort.class),
 				insertThenFail, reservations).signUp(command(email, "rollback-name")))
@@ -221,7 +217,7 @@ class SignUpRedisMySqlIntegrationTest {
 	}
 
 	@Test
-	void profileReservationAndSignupShareTheMySqlWriteMutexAroundRealRedis() throws Exception {
+	void profileReservationBlocksSignupThroughRealRedisWithoutDatabaseMutex() {
 		String userId = transactions.register(
 				new User("profile-race@example.com", "password-hash", "profile-before", 1L)).getId();
 		String email = "signup-race@example.com";
@@ -231,32 +227,68 @@ class SignUpRedisMySqlIntegrationTest {
 		NicknameHoldPort holds = new RedisNicknameHoldAdapter(reservations, new MySqlNicknameIdentityAdapter(jdbcTemplate));
 		UserProfileCommandService profile = new UserProfileCommandService(
 				accounts, userPersistence, accounts, mock(ResolveFixedCharacterAvatarPort.class), holds,
-				new MySqlNicknameWriteTransactionAdapter(jdbcTemplate, transactionManager),
 				new MySqlNicknameIdentityAdapter(jdbcTemplate));
 		AuthService signup = authService(proofStore, mock(EmailVerificationOperationsAlertPort.class));
-		CyclicBarrier start = new CyclicBarrier(2);
-		var executor = Executors.newFixedThreadPool(2);
-		try {
-			var profileAttempt = executor.submit(() -> {
-				start.await();
-				return profile.reserveIfAvailable("shared-race-name", userId);
-			});
-			var signupAttempt = executor.submit(() -> {
-				start.await();
-				try {
-					signup.signUp(command(email, "shared-race-name"));
-					return true;
-				} catch (AuthException exception) {
-					return false;
-				}
-			});
-			boolean profileReserved = profileAttempt.get(15, TimeUnit.SECONDS);
-			boolean accountCreated = signupAttempt.get(15, TimeUnit.SECONDS);
+		assertThat(profile.reserveIfAvailable("shared-race-name", userId)).isTrue();
 
-			assertThat(profileReserved).isNotEqualTo(accountCreated);
-			assertThat(users.findByEmail(new Email(email)).isPresent()).isEqualTo(accountCreated);
-			assertThat(reservations.load("user:" + userId).isPresent()).isEqualTo(profileReserved);
+		assertThatThrownBy(() -> signup.signUp(command(email, "shared-race-name")))
+				.isInstanceOf(AuthException.class);
+		assertThat(users.findByEmail(new Email(email))).isEmpty();
+		assertThat(reservations.load("user:" + userId)).isPresent();
+	}
+
+	@Test
+	void signupStartedWithReservationCanCommitAfterExpiryWithoutDeletingNewOwnersHold() throws Exception {
+		String emailA = "expiry-a@example.com";
+		String emailB = "expiry-b@example.com";
+		RedisEmailVerificationAdapter proofA = new RedisEmailVerificationAdapter(redis);
+		RedisEmailVerificationAdapter proofB = new RedisEmailVerificationAdapter(redis);
+		verifyCode(proofA, emailA, "123456");
+		verifyCode(proofB, emailB, "123456");
+		NicknameReservationStorePort reservations = new RedisNicknameReservationAdapter(redis);
+		String ownerA = "signup:" + EmailVerificationService.hash(emailA);
+		String ownerB = "signup:" + EmailVerificationService.hash(emailB);
+		String nicknameKey = new MySqlNicknameIdentityAdapter(jdbcTemplate).keyFor(new Nickname("expiry-race"));
+		NicknameReservationResult holdA = reservations.reserve(ownerA, nicknameKey, "expiry-race");
+		CountDownLatch signupReachedInsert = new CountDownLatch(1);
+		CountDownLatch allowInsert = new CountDownLatch(1);
+		SignUpTransactionPort delayedInsert = user -> {
+			signupReachedInsert.countDown();
+			try {
+				if (!allowInsert.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("Signup insert was not released");
+			} catch (InterruptedException exception) {
+				Thread.currentThread().interrupt();
+				throw new IllegalStateException(exception);
+			}
+			return transactions.register(user);
+		};
+		AuthService signupA = authService(proofA, mock(EmailVerificationOperationsAlertPort.class), delayedInsert,
+				reservations);
+		var executor = Executors.newSingleThreadExecutor();
+		try {
+			var signupAResult = executor.submit(() -> signupA.signUp(command(emailA, "expiry-race")));
+			assertThat(signupReachedInsert.await(5, TimeUnit.SECONDS)).isTrue();
+
+			String redisOwnerKey = "nickname-reservations:v1:{nickname-holds-v1}:owner:" + ownerA;
+			String redisNicknameKey = "nickname-reservations:v1:{nickname-holds-v1}:nickname:" + nicknameKey;
+			redis.expire(redisOwnerKey, java.time.Duration.ofMillis(25));
+			redis.expire(redisNicknameKey, java.time.Duration.ofMillis(25));
+			Thread.sleep(60);
+			NicknameReservationResult holdB = reservations.reserve(ownerB, nicknameKey, "expiry-race");
+			allowInsert.countDown();
+			signupAResult.get(5, TimeUnit.SECONDS);
+
+			assertThat(users.findByEmail(new Email(emailA))).isPresent();
+			assertThat(reservations.load(ownerB)).contains(holdB);
+			AuthService signupB = authService(proofB, mock(EmailVerificationOperationsAlertPort.class), transactions,
+					reservations);
+			assertThatThrownBy(() -> signupB.signUp(command(emailB, "expiry-race")))
+					.isInstanceOfSatisfying(AuthException.class,
+							exception -> assertThat(exception.getErrorCode().name()).isEqualTo("NICKNAME_ALREADY_EXISTS"));
+			assertThat(users.findByEmail(new Email(emailB))).isEmpty();
+			assertThat(reservations.load(ownerB)).contains(holdB);
 		} finally {
+			allowInsert.countDown();
 			executor.shutdownNow();
 		}
 	}
@@ -354,7 +386,6 @@ class SignUpRedisMySqlIntegrationTest {
 				store,
 				alerts,
 				signupTransactions,
-				new MySqlNicknameWriteTransactionAdapter(jdbcTemplate, transactionManager),
 				new MySqlNicknameIdentityAdapter(jdbcTemplate),
 				reservations);
 	}

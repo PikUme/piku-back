@@ -15,7 +15,6 @@ import com.pikume.back.user.application.port.out.ResolveFixedCharacterAvatarPort
 import com.pikume.back.user.application.port.out.CheckUserUniquenessPort;
 import com.pikume.back.user.application.port.out.LoadUserForProfilePort;
 import com.pikume.back.user.application.port.out.NicknameHoldPort;
-import com.pikume.back.user.application.port.out.NicknameWriteTransactionPort;
 import com.pikume.back.user.application.port.out.NicknameIdentityPort;
 import com.pikume.back.user.application.dto.NicknameHoldSnapshot;
 import com.pikume.back.user.application.port.out.RecordUserAccountPort;
@@ -38,24 +37,21 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 	private final CheckUserUniquenessPort checkUserUniquenessPort;
 	private final ResolveFixedCharacterAvatarPort fixedCharacterAvatarPort;
 	private final NicknameHoldPort nicknameHoldPort;
-	private final NicknameWriteTransactionPort nicknameWriteTransactionPort;
 	private final NicknameIdentityPort nicknameIdentityPort;
 
 	@Override
 	public boolean reserveIfAvailable(String nickname, String userId) {
 		Nickname requestedNickname = new Nickname(nickname);
-		return nicknameWriteTransactionPort.execute(() -> {
-			User user = loadUserForProfilePort.loadProfileUser(userId)
+		User user = loadUserForProfilePort.loadProfileUser(userId)
 					.orElseThrow(UserNotFoundException::new);
-			if (requestedNickname.value().equals(user.getNickname())) return true;
-			if (checkUserUniquenessPort.isNicknameInUse(requestedNickname)) return false;
-			return nicknameHoldPort.tryAcquire(requestedNickname, userId, Instant.now());
-		});
+		if (requestedNickname.value().equals(user.getNickname())) return true;
+		if (checkUserUniquenessPort.isNicknameInUse(requestedNickname)) return false;
+		return nicknameHoldPort.tryAcquire(requestedNickname, userId, Instant.now());
 	}
 
 	@Override
 	public UpdateProfileResult updateProfile(UpdateProfileCommand command) {
-		ProfileUpdate outcome = nicknameWriteTransactionPort.execute(() -> updateProfileWithinTransaction(command));
+		ProfileUpdate outcome = updateProfileWithinTransaction(command);
 		if (outcome.hold() != null) {
 			try {
 				nicknameHoldPort.releaseIfVersionMatches(command.userId(), outcome.hold());
@@ -109,20 +105,17 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 						.filter(value -> value.nicknameKey().equals(nicknameIdentityPort.keyFor(requestedNickname)))
 						.orElse(null)
 				: null;
-		if (nicknameChanged) {
-			user.changeNickname(requestedNickname);
-		}
-		if (characterChanged) {
-			user.changeCharacter(targetCharacterId);
-		}
-		recordUserAccountPort.recordUserAccount(user);
+		recordUserAccountPort.updateProfileFields(
+				user.getId(),
+				nicknameChanged ? requestedNickname.value() : null,
+				characterChanged ? targetCharacterId : null);
 		return new ProfileUpdate(
-				buildSuccessResult(nicknameChanged, characterChanged, user.getNickname(), targetAvatarReference), hold);
+				buildSuccessResult(nicknameChanged, characterChanged,
+					nicknameChanged ? requestedNickname.value() : oldNickname, targetAvatarReference), hold);
 	}
 
 	@Override
 	public void updateProfileImage(String userId, Long imageId) {
-		nicknameWriteTransactionPort.execute(() -> {
 		User user = loadUserForProfilePort.loadProfileUser(userId)
 				.orElseThrow(UserNotFoundException::new);
 
@@ -132,10 +125,7 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 					return new ProfileImageNotFoundException(imageId);
 				});
 
-		user.changeCharacter(imageId);
-		recordUserAccountPort.recordUserAccount(user);
-		return null;
-		});
+		recordUserAccountPort.updateProfileFields(user.getId(), null, imageId);
 	}
 
 	private record ProfileUpdate(UpdateProfileResult result, NicknameHoldSnapshot hold) {}

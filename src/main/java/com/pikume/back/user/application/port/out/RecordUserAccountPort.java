@@ -12,6 +12,8 @@ public interface RecordUserAccountPort {
 	 */
 	User recordUserAccount(User user);
 
+	void updateProfileFields(String userId, String nickname, Long characterId);
+
 	default void updatePasswordOnly(String userId, String passwordHash) {
 		throw new UnsupportedOperationException("Password-only updates are not supported");
 	}

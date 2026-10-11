@@ -12,7 +12,6 @@ import com.pikume.back.user.application.port.out.LoadUserForProfilePort;
 import com.pikume.back.user.application.port.out.RecordUserAccountPort;
 import com.pikume.back.user.application.port.out.NicknameReservationStorePort;
 import com.pikume.back.user.application.port.out.NicknameIdentityPort;
-import com.pikume.back.user.application.port.out.NicknameWriteTransactionPort;
 import com.pikume.back.user.application.port.out.ResolveFixedCharacterAvatarPort;
 import com.pikume.back.user.application.service.UserProfileCommandService;
 import com.pikume.back.user.auth.adapter.in.web.AuthController;
@@ -123,12 +122,6 @@ class NicknameWebContractTest {
 				emailVerificationStorePort,
 				mock(EmailVerificationOperationsAlertPort.class),
 				signUpTransactionPort,
-				new NicknameWriteTransactionPort() {
-					@Override
-					public <T> T execute(java.util.function.Supplier<T> operation) {
-						return operation.get();
-					}
-				},
 				nickname -> nickname.value().toLowerCase(java.util.Locale.ROOT),
 				reservationStore);
 		UserProfileCommandService profileService = new UserProfileCommandService(
@@ -137,12 +130,6 @@ class NicknameWebContractTest {
 				userAccountStore,
 				fixedCharacterAvatarPort,
 				nicknameHoldAdapter,
-				new com.pikume.back.user.application.port.out.NicknameWriteTransactionPort() {
-					@Override
-					public <T> T execute(java.util.function.Supplier<T> operation) {
-						return operation.get();
-					}
-				},
 				nickname -> nickname.value());
 
 		ProblemDetailFactory problemDetailFactory = new ProblemDetailFactory();
@@ -477,6 +464,17 @@ class NicknameWebContractTest {
 				lastSignedUpUser = user;
 			}
 			return user;
+		}
+
+		@Override
+		public void updateProfileFields(String userId, String nickname, Long characterId) {
+			if (!USER_ID.equals(userId)) return;
+			profileUser = new User(
+					profileUser.getId(),
+					profileUser.getEmail(),
+					profileUser.getPassword(),
+					nickname == null ? profileUser.getNickname() : nickname,
+					characterId == null ? profileUser.getCharacterId() : characterId);
 		}
 
 		@Override

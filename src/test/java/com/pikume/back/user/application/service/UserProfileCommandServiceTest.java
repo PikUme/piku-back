@@ -15,7 +15,6 @@ import com.pikume.back.user.application.port.out.ResolveFixedCharacterAvatarPort
 import com.pikume.back.user.application.port.out.CheckUserUniquenessPort;
 import com.pikume.back.user.application.port.out.LoadUserForProfilePort;
 import com.pikume.back.user.application.port.out.NicknameHoldPort;
-import com.pikume.back.user.application.port.out.NicknameWriteTransactionPort;
 import com.pikume.back.user.application.port.out.NicknameIdentityPort;
 import com.pikume.back.user.application.dto.NicknameHoldSnapshot;
 import com.pikume.back.user.application.port.out.RecordUserAccountPort;
@@ -43,6 +42,7 @@ import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 
 @ExtendWith(MockitoExtension.class)
@@ -65,14 +65,10 @@ class UserProfileCommandServiceTest {
 	@Mock
 	private NicknamePolicy nicknamePolicy;
 	@Mock
-	private NicknameWriteTransactionPort nicknameWriteTransactionPort;
-	@Mock
 	private NicknameIdentityPort nicknameIdentityPort;
 
 	@BeforeEach
-	void executeWriteTransactionsInline() {
-		lenient().doAnswer(invocation -> ((java.util.function.Supplier<?>) invocation.getArgument(0)).get())
-				.when(nicknameWriteTransactionPort).execute(any());
+	void configureNicknameIdentity() {
 		lenient().when(nicknameIdentityPort.keyFor(any())).thenAnswer(invocation ->
 				((Nickname) invocation.getArgument(0)).value());
 	}
@@ -204,13 +200,12 @@ class UserProfileCommandServiceTest {
 			given(nicknameHoldPort.loadForOwner("user-1")).willReturn(Optional.of(
 					new NicknameHoldSnapshot("새닉", "key", "version")));
 			given(nicknameIdentityPort.keyFor(new Nickname("새닉"))).willReturn("key");
-			given(recordUserAccountPort.recordUserAccount(user)).willReturn(user);
 
 			UpdateProfileResult result = service.updateProfile(command);
 
 			assertThat(result.success()).isTrue();
 			assertThat(result.newNickname()).isEqualTo("새닉");
-			assertThat(user.getNickname()).isEqualTo("새닉");
+			assertThat(user.getNickname()).isEqualTo("현재닉");
 			then(nicknameHoldPort).should().releaseIfVersionMatches("user-1", new NicknameHoldSnapshot("새닉", "key", "version"));
 		}
 
@@ -224,7 +219,6 @@ class UserProfileCommandServiceTest {
 					.willReturn(true);
 			given(nicknameHoldPort.loadForOwner("user-1")).willReturn(Optional.of(existingHold));
 			given(nicknameIdentityPort.keyFor(new Nickname("CAFE"))).willReturn("db-weight-key");
-			given(recordUserAccountPort.recordUserAccount(user)).willReturn(user);
 
 			UpdateProfileResult result = service.updateProfile(new UpdateProfileCommand("user-1", "CAFE", null));
 
@@ -243,7 +237,6 @@ class UserProfileCommandServiceTest {
 					checkUserUniquenessPort,
 					fixedCharacterAvatarPort,
 					holdAdapter,
-					nicknameWriteTransactionPort,
 					nickname -> nickname.value());
 			given(loadUserForProfilePort.loadProfileUser("user-1")).willReturn(Optional.of(user));
 
@@ -291,14 +284,12 @@ class UserProfileCommandServiceTest {
 			given(loadUserForProfilePort.loadProfileUser("user-1")).willReturn(Optional.of(user));
 			given(fixedCharacterAvatarPort.resolveFixedCharacterObjectKey(2L))
 					.willReturn(Optional.of("public/characters/fixed/base_image_2.webp"));
-			given(recordUserAccountPort.recordUserAccount(any(User.class))).willReturn(user);
 
 			UpdateProfileResult result = service.updateProfile(command);
 
 			assertThat(result.success()).isTrue();
 			assertThat(result.avatarReference()).isEqualTo("public/characters/fixed/base_image_2.webp");
-			verify(recordUserAccountPort).recordUserAccount(same(user));
-			verify(recordUserAccountPort).recordUserAccount(argThat(savedUser -> savedUser.getCharacterId() == 2L));
+			verify(recordUserAccountPort).updateProfileFields("user-1", null, 2L);
 		}
 
 		@Test
@@ -311,7 +302,6 @@ class UserProfileCommandServiceTest {
 			given(nicknameHoldPort.loadForOwner("user-1")).willReturn(Optional.of(
 					new NicknameHoldSnapshot("새닉", "key", "version")));
 			given(nicknameIdentityPort.keyFor(new Nickname("새닉"))).willReturn("key");
-			given(recordUserAccountPort.recordUserAccount(user)).willReturn(user);
 
 			UpdateProfileResult result = service.updateProfile(command);
 
@@ -327,7 +317,8 @@ class UserProfileCommandServiceTest {
 			UpdateProfileCommand command = new UpdateProfileCommand("user-1", "새닉", null);
 			given(loadUserForProfilePort.loadProfileUser("user-1")).willReturn(Optional.of(user));
 			given(nicknameHoldPort.isHeldBy(eq(new Nickname("새닉")), eq("user-1"), any(Instant.class))).willReturn(true);
-			given(recordUserAccountPort.recordUserAccount(user)).willThrow(new NicknameAlreadyExistsException("새닉"));
+			doThrow(new NicknameAlreadyExistsException("새닉"))
+					.when(recordUserAccountPort).updateProfileFields("user-1", "새닉", null);
 
 			assertThatThrownBy(() -> service.updateProfile(command))
 					.isInstanceOf(NicknameAlreadyExistsException.class)
@@ -347,11 +338,10 @@ class UserProfileCommandServiceTest {
 			given(loadUserForProfilePort.loadProfileUser("user-1")).willReturn(Optional.of(user));
 			given(fixedCharacterAvatarPort.resolveFixedCharacterObjectKey(1L))
 					.willReturn(Optional.of("public/characters/fixed/base_image_1.webp"));
-			given(recordUserAccountPort.recordUserAccount(any(User.class))).willReturn(user);
 
 			service.updateProfileImage("user-1", 1L);
 
-			verify(recordUserAccountPort).recordUserAccount(argThat(savedUser -> savedUser.getCharacterId() == 1L));
+			verify(recordUserAccountPort).updateProfileFields("user-1", null, 1L);
 		}
 
 		@Test
@@ -363,7 +353,7 @@ class UserProfileCommandServiceTest {
 
 			assertThatThrownBy(() -> service.updateProfileImage("user-1", 999L))
 					.isInstanceOf(ProfileImageNotFoundException.class);
-			verify(recordUserAccountPort, never()).recordUserAccount(any());
+			verify(recordUserAccountPort, never()).updateProfileFields(anyString(), any(), any());
 		}
 	}
 }

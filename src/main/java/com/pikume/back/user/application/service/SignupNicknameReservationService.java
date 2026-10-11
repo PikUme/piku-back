@@ -8,7 +8,6 @@ import com.pikume.back.user.application.port.in.ReserveSignupNicknameUseCase;
 import com.pikume.back.user.application.port.out.CheckUserUniquenessPort;
 import com.pikume.back.user.application.port.out.NicknameIdentityPort;
 import com.pikume.back.user.application.port.out.NicknameReservationStorePort;
-import com.pikume.back.user.application.port.out.NicknameWriteTransactionPort;
 import com.pikume.back.user.auth.application.port.out.EmailVerificationStorePort;
 import com.pikume.back.user.auth.application.exception.EmailVerificationException;
 import com.pikume.back.user.auth.application.exception.EmailVerificationFailure;
@@ -29,7 +28,6 @@ public class SignupNicknameReservationService implements ReserveSignupNicknameUs
 	private final CheckUserUniquenessPort checkUserUniquenessPort;
 	private final NicknameIdentityPort nicknameIdentityPort;
 	private final NicknameReservationStorePort reservationStorePort;
-	private final NicknameWriteTransactionPort writeTransactionPort;
 
 	@Override
 	public NicknameReservationResult reserve(String rawEmail, String emailVerificationToken, String rawNickname) {
@@ -48,14 +46,12 @@ public class SignupNicknameReservationService implements ReserveSignupNicknameUs
 		String ownerKey = "signup:" + emailKey;
 		String nicknameKey = nicknameIdentityPort.keyFor(nickname);
 
-		return writeTransactionPort.execute(() -> {
-			if (checkUserUniquenessPort.isEmailRegistered(email)) {
-				throw new SignupEmailAlreadyExistsException();
-			}
-			if (checkUserUniquenessPort.isNicknameInUse(nickname)) {
-				throw new NicknameReservationConflictException();
-			}
-			return reservationStorePort.reserve(ownerKey, nicknameKey, nickname.value());
-		});
+		if (checkUserUniquenessPort.isEmailRegistered(email)) {
+			throw new SignupEmailAlreadyExistsException();
+		}
+		if (checkUserUniquenessPort.isNicknameInUse(nickname)) {
+			throw new NicknameReservationConflictException();
+		}
+		return reservationStorePort.reserve(ownerKey, nicknameKey, nickname.value());
 	}
 }

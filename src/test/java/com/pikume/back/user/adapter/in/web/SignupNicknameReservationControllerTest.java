@@ -17,7 +17,6 @@ import com.pikume.back.user.application.port.in.ReserveSignupNicknameUseCase;
 import com.pikume.back.user.application.port.out.CheckUserUniquenessPort;
 import com.pikume.back.user.application.port.out.NicknameIdentityPort;
 import com.pikume.back.user.application.port.out.NicknameReservationStorePort;
-import com.pikume.back.user.application.port.out.NicknameWriteTransactionPort;
 import com.pikume.back.user.application.service.SignupNicknameReservationService;
 import com.pikume.back.user.auth.application.dto.SignupEmailProof;
 import com.pikume.back.user.auth.application.port.out.EmailVerificationStorePort;
@@ -119,12 +118,6 @@ class SignupNicknameReservationControllerTest {
 		CheckUserUniquenessPort users = mock(CheckUserUniquenessPort.class);
 		NicknameIdentityPort identities = mock(NicknameIdentityPort.class);
 		NicknameReservationStorePort reservations = mock(NicknameReservationStorePort.class);
-		NicknameWriteTransactionPort transactions = new NicknameWriteTransactionPort() {
-			@Override
-			public <T> T execute(java.util.function.Supplier<T> operation) {
-				return operation.get();
-			}
-		};
 		String emailKey = EmailVerificationService.hash("member@example.com");
 		String tokenHash = EmailVerificationService.hash("proof-token");
 		when(proofs.loadProof(emailKey, tokenHash)).thenReturn(java.util.Optional.of(
@@ -135,7 +128,7 @@ class SignupNicknameReservationControllerTest {
 		when(reservations.reserve("signup:" + emailKey, "weight-key", "Nickname"))
 				.thenThrow(new NicknameReservationConflictException());
 		mockMvc = MockMvcBuilders.standaloneSetup(new SignupNicknameReservationController(
-				new SignupNicknameReservationService(proofs, users, identities, reservations, transactions)))
+				new SignupNicknameReservationService(proofs, users, identities, reservations)))
 				.setControllerAdvice(new NicknameReservationExceptionHandler(new ProblemDetailFactory()))
 				.build();
 
@@ -154,12 +147,6 @@ class SignupNicknameReservationControllerTest {
 		CheckUserUniquenessPort users = mock(CheckUserUniquenessPort.class);
 		NicknameIdentityPort identities = mock(NicknameIdentityPort.class);
 		NicknameReservationStorePort reservations = mock(NicknameReservationStorePort.class);
-		NicknameWriteTransactionPort transactions = new NicknameWriteTransactionPort() {
-			@Override
-			public <T> T execute(java.util.function.Supplier<T> operation) {
-				return operation.get();
-			}
-		};
 		when(proofs.loadProof(any(), any())).thenThrow(new EmailVerificationException(
 				EmailVerificationFailure.VERIFICATION_UNAVAILABLE, new IllegalStateException("redis"), "proof_load"));
 		DiscordWebhookService alert = mock(DiscordWebhookService.class);
@@ -170,7 +157,7 @@ class SignupNicknameReservationControllerTest {
 		given(environment.getActiveProfiles()).willReturn(new String[] {"test"});
 		ProblemDetailFactory problems = new ProblemDetailFactory();
 		mockMvc = MockMvcBuilders.standaloneSetup(new SignupNicknameReservationController(
-				new SignupNicknameReservationService(proofs, users, identities, reservations, transactions)))
+				new SignupNicknameReservationService(proofs, users, identities, reservations)))
 				.setControllerAdvice(new NicknameReservationExceptionHandler(problems),
 						new EmailVerificationExceptionHandler(problems, provider, environment))
 				.build();

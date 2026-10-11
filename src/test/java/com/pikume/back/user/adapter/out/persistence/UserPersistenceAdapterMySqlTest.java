@@ -1,6 +1,12 @@
 package com.pikume.back.user.adapter.out.persistence;
 
 import com.pikume.back.user.domain.User;
+import com.pikume.back.user.application.dto.UpdateProfileCommand;
+import com.pikume.back.user.application.port.out.NicknameHoldPort;
+import com.pikume.back.user.application.port.out.NicknameIdentityPort;
+import com.pikume.back.user.application.port.out.ResolveFixedCharacterAvatarPort;
+import com.pikume.back.user.application.service.UserProfileCommandService;
+import com.pikume.back.user.adapter.out.persistence.UserAccountPersistenceAdapter;
 import com.pikume.back.user.domain.vo.Email;
 import com.pikume.back.user.domain.vo.Nickname;
 import com.pikume.back.user.domain.exception.EmailAlreadyExistsException;
@@ -125,6 +131,34 @@ class UserPersistenceAdapterMySqlTest {
 		User stored = userJpaRepository.findByEmail(new Email("password-reset@example.com")).orElseThrow();
 		assertThat(stored.getNickname()).isEqualTo("after");
 		assertThat(stored.getPassword()).isEqualTo("new-hash");
+	}
+
+	@Test
+	@DisplayName("캐릭터만 바꾸는 프로필 저장은 읽은 뒤 확정된 최신 닉네임을 덮어쓰지 않는다")
+	void characterOnlyProfileUpdateDoesNotOverwriteNicknameChangedAfterLoad() {
+		User original = new User("profile-race@example.com", "password", "before", 1L);
+		persist(original);
+		UserAccountPersistenceAdapter accounts = new UserAccountPersistenceAdapter(userJpaRepository);
+		UserPersistenceAdapter writes = new UserPersistenceAdapter(userJpaRepository);
+		ResolveFixedCharacterAvatarPort characterReference = characterId -> {
+			User latest = accounts.loadProfileUser(original.getId()).orElseThrow();
+			latest.changeNickname(new Nickname("concurrent-name"));
+			persist(latest);
+			return java.util.Optional.of("fixed-character-image");
+		};
+		UserProfileCommandService service = new UserProfileCommandService(
+				accounts,
+				writes,
+				accounts,
+				characterReference,
+				org.mockito.Mockito.mock(NicknameHoldPort.class),
+				org.mockito.Mockito.mock(NicknameIdentityPort.class));
+
+		service.updateProfile(new UpdateProfileCommand(original.getId(), null, 2L));
+
+		User stored = userJpaRepository.findById(original.getId()).orElseThrow();
+		assertThat(stored.getNickname()).isEqualTo("concurrent-name");
+		assertThat(stored.getCharacterId()).isEqualTo(2L);
 	}
 
 	private long countBy(String column, String value) {

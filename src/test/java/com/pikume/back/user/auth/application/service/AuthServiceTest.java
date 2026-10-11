@@ -14,7 +14,6 @@ import com.pikume.back.user.application.port.out.LoadUserForPasswordResetPort;
 import com.pikume.back.user.application.port.out.RecordUserAccountPort;
 import com.pikume.back.user.application.port.out.NicknameIdentityPort;
 import com.pikume.back.user.application.port.out.NicknameReservationStorePort;
-import com.pikume.back.user.application.port.out.NicknameWriteTransactionPort;
 import com.pikume.back.user.auth.application.dto.ResetPasswordCommand;
 import com.pikume.back.user.auth.application.dto.SignUpCommand;
 import com.pikume.back.user.auth.application.dto.SignupEmailProof;
@@ -37,7 +36,6 @@ import com.pikume.back.user.domain.service.PasswordPolicy;
 import java.lang.reflect.Field;
 import java.time.LocalDateTime;
 import java.util.Optional;
-import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -84,8 +82,6 @@ class AuthServiceTest {
 	@Mock
 	private SignUpTransactionPort signUpTransactionPort;
 	@Mock
-	private NicknameWriteTransactionPort nicknameWriteTransactionPort;
-	@Mock
 	private NicknameIdentityPort nicknameIdentityPort;
 	@Mock
 	private NicknameReservationStorePort nicknameReservationStorePort;
@@ -96,8 +92,6 @@ class AuthServiceTest {
 
 	@BeforeEach
 	void configureNicknameWritePorts() {
-		lenient().doAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get())
-				.when(nicknameWriteTransactionPort).execute(any());
 		lenient().when(nicknameIdentityPort.keyFor(any())).thenReturn("nickname-key");
 		lenient().when(nicknameReservationStorePort.isReservedByOther(any(), any())).thenReturn(false);
 		lenient().when(nicknameReservationStorePort.load(any())).thenReturn(Optional.empty());

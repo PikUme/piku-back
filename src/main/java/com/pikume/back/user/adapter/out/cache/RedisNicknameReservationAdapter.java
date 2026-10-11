@@ -28,24 +28,29 @@ public class RedisNicknameReservationAdapter implements NicknameReservationStore
 			local nickname = ARGV[2]
 			local version = ARGV[3]
 			local displayName = ARGV[4]
+			local expectedOldKey = ARGV[5]
 			local oldVersion = redis.call('HGET', KEYS[2], 'version')
 			local oldKey = redis.call('HGET', KEYS[2], 'nicknameKey')
-			local oldDisplayName = redis.call('HGET', KEYS[1], 'nickname')
-			local oldExpiry = tonumber(redis.call('HGET', KEYS[1], 'expiresAt') or '0')
-		local targetOwner = redis.call('HGET', KEYS[1], 'ownerKey')
+			local targetExists = redis.call('EXISTS', KEYS[1])
+			local targetOwner = redis.call('HGET', KEYS[1], 'ownerKey')
+		if targetExists == 1 and (not targetOwner or targetOwner == '') then return 'INCONSISTENT' end
 		if targetOwner then
-			if redis.call('HGET', KEYS[4], 'nicknameKey') ~= nickname
-				or redis.call('HGET', KEYS[4], 'version') ~= redis.call('HGET', KEYS[1], 'version') then
+			local targetNicknameKey = redis.call('HGET', KEYS[1], 'nicknameKey')
+			local targetVersion = redis.call('HGET', KEYS[1], 'version')
+			local targetDisplayName = redis.call('HGET', KEYS[1], 'nickname')
+			local targetExpiry = redis.call('HGET', KEYS[1], 'expiresAt')
+			if targetNicknameKey ~= nickname or not targetVersion or not targetDisplayName or not targetExpiry then
 				return 'INCONSISTENT'
 			end
-		end
-			if oldKey == nickname and oldVersion then
-				if redis.call('HGET', KEYS[1], 'ownerKey') ~= owner
-					or redis.call('HGET', KEYS[1], 'version') ~= oldVersion then return 'INCONSISTENT' end
-				return 'RESERVED|' .. oldVersion .. '|' .. oldExpiry .. '|' .. oldDisplayName
+			if targetOwner == owner then
+				if oldKey == nickname and oldVersion == targetVersion then
+					return 'RESERVED|' .. targetVersion .. '|' .. targetExpiry .. '|' .. targetDisplayName
+				end
+				return 'INCONSISTENT'
 			end
-		if targetOwner and targetOwner ~= owner then return 'CONFLICT' end
-		if targetOwner == owner and redis.call('HGET', KEYS[1], 'version') ~= oldVersion then return 'INCONSISTENT' end
+			return 'CONFLICT'
+		end
+		if (oldKey or 'ABSENT') ~= expectedOldKey then return 'CONFLICT' end
 		if oldKey and oldVersion then
 			if redis.call('HGET', KEYS[3], 'ownerKey') ~= owner
 				or redis.call('HGET', KEYS[3], 'version') ~= oldVersion then return 'INCONSISTENT' end
@@ -55,7 +60,8 @@ public class RedisNicknameReservationAdapter implements NicknameReservationStore
 		redis.call('HSET', KEYS[1], 'ownerKey', owner, 'nicknameKey', nickname, 'version', version,
 			'nickname', displayName, 'expiresAt', expiresAt)
 		redis.call('PEXPIREAT', KEYS[1], expiresAt)
-		redis.call('HSET', KEYS[2], 'nicknameKey', nickname, 'version', version)
+		redis.call('HSET', KEYS[2], 'nicknameKey', nickname, 'version', version,
+			'nickname', displayName, 'expiresAt', expiresAt)
 		redis.call('PEXPIREAT', KEYS[2], expiresAt)
 		return 'RESERVED|' .. version .. '|' .. expiresAt .. '|' .. displayName
 		""", String.class);
@@ -86,26 +92,6 @@ public class RedisNicknameReservationAdapter implements NicknameReservationStore
 			redis.call('DEL', KEYS[1], KEYS[2])
 			return 1
 			""", Long.class);
-	private static final DefaultRedisScript<List> PAIR_READ = new DefaultRedisScript<>("""
-			local ownerExists = redis.call('EXISTS', KEYS[1])
-			local nicknameExists = redis.call('EXISTS', KEYS[2])
-			if ownerExists == 0 and nicknameExists == 0 then return {'MISSING'} end
-			if ownerExists == 0 or nicknameExists == 0 then return {'INCONSISTENT'} end
-			local ownerVersion = redis.call('HGET', KEYS[1], 'version')
-			local ownerNicknameKey = redis.call('HGET', KEYS[1], 'nicknameKey')
-			local nicknameOwner = redis.call('HGET', KEYS[2], 'ownerKey')
-			local nicknameVersion = redis.call('HGET', KEYS[2], 'version')
-			local indexedNicknameKey = redis.call('HGET', KEYS[2], 'nicknameKey')
-			local displayName = redis.call('HGET', KEYS[2], 'nickname')
-			local expiresAt = redis.call('HGET', KEYS[2], 'expiresAt')
-			if not ownerVersion or not ownerNicknameKey or not nicknameOwner or not nicknameVersion
-				or not indexedNicknameKey or not displayName or not expiresAt
-				or ownerNicknameKey ~= ARGV[2] or indexedNicknameKey ~= ARGV[2]
-				or nicknameOwner ~= ARGV[1] or ownerVersion ~= nicknameVersion then
-				return {'INCONSISTENT'}
-			end
-			return {'PAIR', displayName, indexedNicknameKey, ownerVersion, expiresAt}
-			""", List.class);
 
 	private final StringRedisTemplate redis;
 
@@ -115,19 +101,20 @@ public class RedisNicknameReservationAdapter implements NicknameReservationStore
 
 	@Override
 	public NicknameReservationResult reserve(String ownerKey, String nicknameKey, String nickname) {
+		return reserveOnce(ownerKey, nicknameKey, nickname);
+	}
+
+	private NicknameReservationResult reserveOnce(String ownerKey, String nicknameKey, String nickname) {
 		String ownerRedisKey = ownerRedisKey(ownerKey);
 		Map<Object, Object> existing = read(ownerRedisKey, "reservation_read");
 		String oldNicknameKey = (String) existing.get("nicknameKey");
 		if (!existing.isEmpty() && oldNicknameKey == null) throw unavailable("reservation_consistency", null);
 		String targetRedisKey = nicknameRedisKey(nicknameKey);
-		Map<Object, Object> target = read(targetRedisKey, "reservation_read");
-		String targetOwner = (String) target.get("ownerKey");
-		if (!target.isEmpty() && targetOwner == null) throw unavailable("reservation_consistency", null);
-		String targetOwnerRedisKey = targetOwner == null ? ownerRedisKey : ownerRedisKey(targetOwner);
 		String version = UUID.randomUUID().toString();
 		String oldRedisKey = oldNicknameKey == null ? targetRedisKey : nicknameRedisKey(oldNicknameKey);
-		String result = execute(RESERVE, List.of(targetRedisKey, ownerRedisKey, oldRedisKey, targetOwnerRedisKey),
-				"reservation_write", ownerKey, nicknameKey, version, nickname);
+		String result = execute(RESERVE, List.of(targetRedisKey, ownerRedisKey, oldRedisKey),
+				"reservation_write", ownerKey, nicknameKey, version, nickname,
+				oldNicknameKey == null ? "ABSENT" : oldNicknameKey);
 		String[] parts = result.split("\\|", 4);
 		return switch (parts[0]) {
 			case "CONFLICT" -> throw new NicknameReservationConflictException();
@@ -141,34 +128,17 @@ public class RedisNicknameReservationAdapter implements NicknameReservationStore
 	@Override
 	public Optional<NicknameReservationResult> load(String ownerKey) {
 		Map<Object, Object> owner = read(ownerRedisKey(ownerKey), "reservation_read");
-		String nicknameKey = (String) owner.get("nicknameKey");
 		if (owner.isEmpty()) return Optional.empty();
-		if (nicknameKey == null) throw unavailable("reservation_consistency", null);
-		List<?> pair = readPair(ownerKey, nicknameKey);
-		if ("MISSING".equals(pair.get(0))) return Optional.empty();
-		if (!"PAIR".equals(pair.get(0))) throw unavailable("reservation_consistency", null);
-		return Optional.of(new NicknameReservationResult((String) pair.get(1), (String) pair.get(2),
-				(String) pair.get(3), LocalDateTime.ofInstant(Instant.ofEpochMilli(Long.parseLong((String) pair.get(4))), KST)));
+		return Optional.of(toReservation(owner));
 	}
 
 	@Override
 	public boolean isHeldBy(String nicknameKey, String ownerKey) {
 		try {
 			Map<Object, Object> target = read(nicknameRedisKey(nicknameKey), "reservation_read");
-			if (target.isEmpty()) {
-				Map<Object, Object> owner = read(ownerRedisKey(ownerKey), "reservation_read");
-				if (owner.isEmpty() || !nicknameKey.equals(owner.get("nicknameKey"))) return false;
-				List<?> pair = readPair(ownerKey, nicknameKey);
-				if ("MISSING".equals(pair.get(0))) return false;
-				if (!"PAIR".equals(pair.get(0))) throw unavailable("reservation_consistency", null);
-				return true;
-			}
-			String actualOwner = (String) target.get("ownerKey");
-			if (actualOwner == null) throw unavailable("reservation_consistency", null);
-			List<?> pair = readPair(actualOwner, nicknameKey);
-			if ("MISSING".equals(pair.get(0))) return false;
-			if (!"PAIR".equals(pair.get(0))) throw unavailable("reservation_consistency", null);
-			return ownerKey.equals(actualOwner);
+			if (target.isEmpty()) return false;
+			validateNicknameRecord(target, nicknameKey);
+			return ownerKey.equals(target.get("ownerKey"));
 		} catch (NicknameReservationUnavailableException exception) {
 			throw exception;
 		} catch (RuntimeException exception) {
@@ -180,12 +150,8 @@ public class RedisNicknameReservationAdapter implements NicknameReservationStore
 	public boolean isReservedByOther(String nicknameKey, String ownerKey) {
 		Map<Object, Object> target = read(nicknameRedisKey(nicknameKey), "reservation_read");
 		if (target.isEmpty()) return false;
-		String actualOwner = (String) target.get("ownerKey");
-		if (actualOwner == null) throw unavailable("reservation_consistency", null);
-		List<?> pair = readPair(actualOwner, nicknameKey);
-		if ("MISSING".equals(pair.get(0))) return false;
-		if (!"PAIR".equals(pair.get(0))) throw unavailable("reservation_consistency", null);
-		return !ownerKey.equals(actualOwner);
+		validateNicknameRecord(target, nicknameKey);
+		return !ownerKey.equals(target.get("ownerKey"));
 	}
 
 	@Override
@@ -201,14 +167,32 @@ public class RedisNicknameReservationAdapter implements NicknameReservationStore
 		return result == 1L;
 	}
 
-	private List<?> readPair(String ownerKey, String nicknameKey) {
+	private NicknameReservationResult toReservation(Map<Object, Object> record) {
+		String nickname = (String) record.get("nickname");
+		String nicknameKey = (String) record.get("nicknameKey");
+		String version = (String) record.get("version");
+		Object expiresAtValue = record.get("expiresAt");
+		if (nickname == null || nicknameKey == null || version == null || expiresAtValue == null) {
+			throw unavailable("reservation_consistency", null);
+		}
 		try {
-			List<?> result = redis.execute(PAIR_READ,
-					List.of(ownerRedisKey(ownerKey), nicknameRedisKey(nicknameKey)), ownerKey, nicknameKey);
-			if (result == null || result.isEmpty()) throw new IllegalStateException("Redis returned no pair result");
-			return result;
+			return new NicknameReservationResult(nickname, nicknameKey, version,
+					LocalDateTime.ofInstant(Instant.ofEpochMilli(Long.parseLong(expiresAtValue.toString())), KST));
 		} catch (RuntimeException exception) {
-			throw unavailable("reservation_read", exception);
+			throw unavailable("reservation_consistency", exception);
+		}
+	}
+
+	private void validateNicknameRecord(Map<Object, Object> record, String requestedNicknameKey) {
+		if (record.get("ownerKey") == null || record.get("version") == null
+				|| record.get("nickname") == null || record.get("expiresAt") == null
+				|| !requestedNicknameKey.equals(record.get("nicknameKey"))) {
+			throw unavailable("reservation_consistency", null);
+		}
+		try {
+			Long.parseLong(record.get("expiresAt").toString());
+		} catch (RuntimeException exception) {
+			throw unavailable("reservation_consistency", exception);
 		}
 	}
 
