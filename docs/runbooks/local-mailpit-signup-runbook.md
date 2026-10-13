@@ -35,9 +35,9 @@ Firebase 초기화는 prod 프로필에서만 수행합니다. dev JVM 실행에
 
 데이터베이스와 객체 저장소 설정은 로컬 환경에 보관합니다. 저장소의 dev 설정에는 기본값이 있습니다. 실행 중인 서비스에 별도 값이 필요하면 로컬 환경 변수로 설정하고 공유하지 않습니다.
 
-## 선택형 Compose 모드 실행
+## Compose 개발 환경에서 Mailpit 사용
 
-Mailpit 웹 UI는 `127.0.0.1:8025`에, 호스트 SMTP는 `127.0.0.1:1025`에 기본 바인딩됩니다. 포트가 사용 중이면 호스트 포트를 변경합니다.
+기본 dev 스택에는 Mailpit이 포함됩니다. Mailpit 웹 UI는 `127.0.0.1:8025`에, 호스트 SMTP는 `127.0.0.1:1025`에 기본 바인딩됩니다. 포트가 사용 중이면 호스트 포트를 변경합니다.
 
 ```bash
 scripts/compose.sh dev-mailpit up
@@ -47,7 +47,15 @@ scripts/compose.sh dev-mailpit up
 MAILPIT_UI_PORT=18025 MAILPIT_SMTP_PORT=11025 scripts/compose.sh dev-mailpit up
 ```
 
-기본 UI 주소는 `http://127.0.0.1:8025`입니다. 다른 UI 포트를 설정했다면 해당 주소를 열어 수신 메일을 확인합니다. Compose 앱의 SMTP 주소는 Docker 네트워크의 `mailpit:1025`입니다.
+기본 UI 주소는 `http://127.0.0.1:8025`입니다. 다른 UI 포트를 설정했다면 해당 주소를 열어 수신 메일을 확인합니다. 이 모드에서 Compose 앱의 SMTP 주소는 Docker 네트워크의 `mailpit:1025`입니다.
+
+IntelliJ에서 호스트 JVM으로 앱을 실행할 때는 dev Compose 설정에서 Mailpit 서비스만 시작합니다.
+
+```bash
+docker compose -f docker-compose.dev.yml up -d mailpit
+```
+
+호스트 앱의 SMTP 호스트는 `localhost`, 포트는 기본 `1025`로 설정합니다. 포트를 바꿨다면 `SPRING_MAIL_PORT`에도 같은 호스트 포트를 지정합니다. UI는 `http://127.0.0.1:8025`에서 엽니다.
 
 기존 개발 스택에서 기본값과 다른 Compose 프로젝트 이름이나 디렉터리를 사용한다면 해당 값을 지정합니다. 그러면 기존 컨테이너와 볼륨을 재사용할 수 있습니다.
 

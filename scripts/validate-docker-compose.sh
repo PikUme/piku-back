@@ -132,11 +132,11 @@ validate_core() {
   # shellcheck disable=SC2086
   compose_config --quiet $dev_files
   # shellcheck disable=SC2086
-  assert_service_set "dev + infra" "app db minio redis" $dev_files
+  assert_service_set "dev + infra" "app db mailpit minio redis" $dev_files
   # shellcheck disable=SC2086
   assert_service_set \
     "dev + infra provision" \
-    "app db minio minio-provision redis" \
+    "app db mailpit minio minio-provision redis" \
     --profile provision $dev_files
   # shellcheck disable=SC2086
   assert_profile_set "dev + infra" "provision" $dev_files

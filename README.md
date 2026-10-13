@@ -41,7 +41,7 @@ Pikume 프로젝트의 백엔드 저장소입니다.
 
 3.  **Docker Compose를 사용하여 개발 환경을 실행합니다.**
 
-    개발 애플리케이션과 데이터베이스는 Redis, MinIO 인프라 구성과 함께 실행합니다.
+    개발 애플리케이션과 데이터베이스, Mailpit은 Redis, MinIO 인프라 구성과 함께 실행합니다.
 
     ```bash
     docker compose \
@@ -68,7 +68,7 @@ Pikume 프로젝트의 백엔드 저장소입니다.
       down
     ```
 
-    로컬 회원가입 인증 메일을 Mailpit에서 확인하려면 선택형 모드를 사용합니다. 실행과 실제 API 검증 절차는 [로컬 Mailpit 회원가입 검증 절차서](docs/runbooks/local-mailpit-signup-runbook.md)를 참고하세요.
+    로컬 회원가입 인증 메일은 `http://127.0.0.1:8025`에서 확인할 수 있습니다. IntelliJ에서 호스트 JVM으로 앱을 실행할 때 Mailpit만 시작하는 방법과 실제 API 검증 절차는 [로컬 Mailpit 회원가입 검증 절차서](docs/runbooks/local-mailpit-signup-runbook.md)를 참고하세요.
 
     ```bash
     scripts/compose.sh dev-mailpit up
