@@ -29,7 +29,7 @@ compose_service_json_with_db_port() {
       config --no-env-resolution --format json "$service"
 }
 
-compose_mailpit_service_json() {
+compose_dev_service_json() {
   service=$1
   shift
 
@@ -103,29 +103,12 @@ assert_db_port() {
   fi
 }
 
-assert_mailpit_app_context() {
-  expected_context=$1
-  shift
-
-  rendered=$(PIKU_BACK_APP_BUILD_CONTEXT="$expected_context" \
-    compose_mailpit_service_json app "$@")
-  printf '%s\n' "$rendered" | python3 -c '
-import json
-import sys
-
-config = json.load(sys.stdin)
-app = config.get("services", {}).get("app", config.get("app", config))
-assert app["build"]["context"] == sys.argv[1]
-' "$expected_context"
-}
-
 validate_core() {
   env_file_reset=$(mktemp)
   trap 'rm -f "$env_file_reset"' EXIT HUP INT TERM
   printf 'services:\n  app:\n    env_file: !reset []\n' > "$env_file_reset"
 
   dev_files="-f docker-compose.dev.yml -f docker-compose.infra.yml -f $env_file_reset"
-  dev_mailpit_files="-f docker-compose.dev.yml -f docker-compose.infra.yml -f docker-compose.mailpit.yml -f $env_file_reset"
   prod_files="-f docker-compose.prod.yml -f docker-compose.infra.yml -f $env_file_reset"
 
   # Word splitting is intentional so each Compose flag is passed separately.
@@ -146,39 +129,7 @@ validate_core() {
   assert_db_port "dev custom DB port" "13306" "13306" "db" $dev_files
 
   # shellcheck disable=SC2086
-  compose_config --quiet $dev_mailpit_files
-  # shellcheck disable=SC2086
-  assert_service_set "dev + infra + Mailpit" "app db mailpit minio redis" $dev_mailpit_files
-  # shellcheck disable=SC2086
-  assert_service_set \
-    "dev + infra + Mailpit provision" \
-    "app db mailpit minio minio-provision redis" \
-    --profile provision $dev_mailpit_files
-  # shellcheck disable=SC2086
-  assert_profile_set "dev + infra + Mailpit" "provision" $dev_mailpit_files
-
-  # shellcheck disable=SC2086
-  mailpit_app=$(compose_mailpit_service_json app $dev_mailpit_files)
-  printf '%s\n' "$mailpit_app" | python3 -c '
-import json
-import sys
-
-config = json.load(sys.stdin)
-app = config.get("services", {}).get("app", config.get("app", config))
-env = app["environment"]
-assert env["SPRING_MAIL_HOST"] == "mailpit"
-assert str(env["SPRING_MAIL_PORT"]) == "1025"
-assert env["SPRING_MAIL_USERNAME"] == "signup-test@pikume.test"
-assert env["SPRING_MAIL_PASSWORD"] == ""
-assert str(env["SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH"]).lower() == "false"
-assert str(env["SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE"]).lower() == "false"
-assert app["depends_on"]["mailpit"]["condition"] == "service_healthy"
-'
-  # shellcheck disable=SC2086
-  assert_mailpit_app_context "/tmp/piku-back-worktree" $dev_mailpit_files
-
-  # shellcheck disable=SC2086
-  mailpit_service=$(compose_mailpit_service_json mailpit $dev_mailpit_files)
+  mailpit_service=$(compose_dev_service_json mailpit $dev_files)
   printf '%s\n' "$mailpit_service" | python3 -c '
 import json
 import sys
@@ -325,34 +276,6 @@ compose -f docker-compose.dev.yml -f docker-compose.infra.yml up -d minio
 compose -f docker-compose.dev.yml -f docker-compose.infra.yml --profile provision run --rm -T --interactive=false minio-provision
 compose -f docker-compose.dev.yml -f docker-compose.infra.yml up -d --build" \
     dev up
-  project_directory=$(git -C "$REPOSITORY_ROOT" worktree list --porcelain | sed -n '1s/^worktree //p')
-  project_name=$(basename "$project_directory")
-  mailpit_compose_prefix="compose --project-directory $project_directory --project-name $project_name -f $REPOSITORY_ROOT/docker-compose.dev.yml -f $REPOSITORY_ROOT/docker-compose.infra.yml -f $REPOSITORY_ROOT/docker-compose.mailpit.yml"
-  compose_runner_minio_id=
-  assert_compose_runner_command \
-    "dev-mailpit first up" \
-    "$mailpit_compose_prefix ps -a -q minio
-$mailpit_compose_prefix up -d minio
-$mailpit_compose_prefix --profile provision run --rm -T --interactive=false minio-provision
-$mailpit_compose_prefix up -d --build" \
-    dev-mailpit up
-  compose_runner_minio_id=piku-minio
-  assert_compose_runner_command \
-    "dev-mailpit ps" \
-    "$mailpit_compose_prefix ps" \
-    dev-mailpit ps
-  assert_compose_runner_command \
-    "dev-mailpit down" \
-    "$mailpit_compose_prefix down" \
-    dev-mailpit down
-  assert_compose_runner_command \
-    "dev-mailpit logs" \
-    "$mailpit_compose_prefix logs -f" \
-    dev-mailpit logs
-  assert_compose_runner_command \
-    "dev-mailpit rebuild-app" \
-    "$mailpit_compose_prefix up -d --build --no-deps app" \
-    dev-mailpit rebuild-app
   compose_runner_minio_id=piku-minio
   assert_compose_runner_command \
     "prod subsequent up" \
@@ -392,11 +315,6 @@ compose -f docker-compose.prod.yml -f docker-compose.infra.yml up -d --build" \
     "unknown action" \
     "usage:" \
     dev start
-  assert_compose_runner_failure \
-    "unknown dev-mailpit action" \
-    "usage:" \
-    dev-mailpit start
-
   rm -rf "$compose_runner_temp_dir"
   trap - EXIT HUP INT TERM
 }

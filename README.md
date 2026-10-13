@@ -68,11 +68,7 @@ Pikume 프로젝트의 백엔드 저장소입니다.
       down
     ```
 
-    로컬 회원가입 인증 메일은 `http://127.0.0.1:8025`에서 확인할 수 있습니다. IntelliJ에서 호스트 JVM으로 앱을 실행할 때 Mailpit만 시작하는 방법과 실제 API 검증 절차는 [로컬 Mailpit 회원가입 검증 절차서](docs/runbooks/local-mailpit-signup-runbook.md)를 참고하세요.
-
-    ```bash
-    scripts/compose.sh dev-mailpit up
-    ```
+    Mailpit UI는 `http://127.0.0.1:8025`에서 확인할 수 있습니다. IntelliJ에서 호스트 JVM으로 앱을 실행할 때 Mailpit만 시작하는 방법과 실제 API 검증 절차는 [로컬 Mailpit 회원가입 검증 절차서](docs/runbooks/local-mailpit-signup-runbook.md)를 참고하세요.
 
 ### 운영용 앱 실행
 

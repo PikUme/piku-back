@@ -29,7 +29,7 @@
 
 기본 체크아웃은 worktree를 추가하기 전의 원래 저장소 디렉터리입니다. 새 Git worktree에는 무시된 `.env` 파일과 로컬 파일이 자동 복사되지 않습니다.
 
-Compose 도우미는 기본 체크아웃의 공유 프로젝트와 기존 데이터 경로를 사용합니다. 앱은 현재 worktree의 코드로 빌드합니다. Compose는 기본 체크아웃의 `.env`를 기존 방식대로 불러옵니다. 파일 내용을 채팅이나 로그 또는 문서에 복사하지 않습니다.
+기존 개발 컨테이너와 데이터 경로를 사용하려면 기본 체크아웃에서 Compose 명령을 실행합니다. 새 worktree에서 실행하면 별도 Compose 프로젝트와 데이터 경로가 만들어질 수 있습니다. Compose는 실행 디렉터리의 `.env`를 불러옵니다. 파일 내용을 채팅이나 로그 또는 문서에 복사하지 않습니다.
 
 Firebase 초기화는 prod 프로필에서만 수행합니다. dev JVM 실행에는 Firebase 자격 증명 파일이 필요하지 않습니다. 이는 기존 Docker 앱의 자격 증명 바인드 마운트와 별개입니다.
 
@@ -37,17 +37,7 @@ Firebase 초기화는 prod 프로필에서만 수행합니다. dev JVM 실행에
 
 ## Compose 개발 환경에서 Mailpit 사용
 
-기본 dev 스택에는 Mailpit이 포함됩니다. Mailpit 웹 UI는 `127.0.0.1:8025`에, 호스트 SMTP는 `127.0.0.1:1025`에 기본 바인딩됩니다. 포트가 사용 중이면 호스트 포트를 변경합니다.
-
-```bash
-scripts/compose.sh dev-mailpit up
-```
-
-```bash
-MAILPIT_UI_PORT=18025 MAILPIT_SMTP_PORT=11025 scripts/compose.sh dev-mailpit up
-```
-
-기본 UI 주소는 `http://127.0.0.1:8025`입니다. 다른 UI 포트를 설정했다면 해당 주소를 열어 수신 메일을 확인합니다. 이 모드에서 Compose 앱의 SMTP 주소는 Docker 네트워크의 `mailpit:1025`입니다.
+기본 dev 스택에는 Mailpit이 포함됩니다. Mailpit 웹 UI는 `127.0.0.1:8025`에, 호스트 SMTP는 `127.0.0.1:1025`에 기본 바인딩됩니다. 포트를 바꾸려면 `MAILPIT_UI_PORT` 또는 `MAILPIT_SMTP_PORT`를 설정합니다. 기존 개발 컨테이너와 데이터 경로를 재사용할 때는 기본 체크아웃에서 명령을 실행합니다.
 
 IntelliJ에서 호스트 JVM으로 앱을 실행할 때는 dev Compose 설정에서 Mailpit 서비스만 시작합니다.
 
@@ -57,33 +47,19 @@ docker compose -f docker-compose.dev.yml up -d mailpit
 
 호스트 앱의 SMTP 호스트는 `localhost`, 포트는 기본 `1025`로 설정합니다. 포트를 바꿨다면 `SPRING_MAIL_PORT`에도 같은 호스트 포트를 지정합니다. UI는 `http://127.0.0.1:8025`에서 엽니다.
 
-기존 개발 스택에서 기본값과 다른 Compose 프로젝트 이름이나 디렉터리를 사용한다면 해당 값을 지정합니다. 그러면 기존 컨테이너와 볼륨을 재사용할 수 있습니다.
+Compose에서 실행하는 앱은 `.env` 등 Compose가 읽는 환경 설정에 SMTP 호스트 `mailpit`, 포트 `1025`, SMTP 인증 `false`, STARTTLS `false`를 지정해야 합니다. IntelliJ 호스트 JVM용 `SPRING_MAIL_*` 셸 변수는 Compose 앱 컨테이너에 전달되지 않습니다.
 
 ```bash
-DEV_COMPOSE_PROJECT_DIRECTORY=/path/to/primary/piku-back \
-DEV_COMPOSE_PROJECT_NAME=piku-back \
-scripts/compose.sh dev-mailpit up
+docker compose -f docker-compose.dev.yml -f docker-compose.infra.yml down
 ```
 
-일반 dev와 dev-mailpit은 개발 앱과 데이터베이스, Redis, MinIO 및 Compose 프로젝트를 공유합니다. 두 모드를 별도 스택으로 동시에 실행하지 않습니다.
-
-기능 worktree에서 일반 dev로 돌아갈 때는 먼저 공유 프로젝트를 중지합니다. 같은 프로젝트와 데이터 경로를 유지하려면 기본 체크아웃에서 일반 모드를 실행합니다.
-
-```bash
-scripts/compose.sh dev-mailpit down
-cd /path/to/primary/piku-back
-scripts/compose.sh dev up
-```
-
-기본 체크아웃에서 일반 dev를 실행하면 같은 Compose 프로젝트와 데이터 경로를 사용합니다. 앱은 해당 체크아웃의 코드로 빌드합니다. `down`은 볼륨을 보존하지만 공유 프로젝트의 서비스는 중지합니다. Mailpit을 중지하기 전에 필요한 메일을 확인합니다. 컨테이너를 제거하면 받은 편지함도 삭제될 수 있습니다.
+`down`은 볼륨을 보존하지만 해당 Compose 프로젝트의 서비스를 중지합니다. Mailpit을 중지하기 전에 필요한 메일을 확인합니다. 컨테이너를 제거하면 받은 편지함도 삭제될 수 있습니다.
 
 상태·로그 확인:
 
 ```bash
-scripts/compose.sh dev-mailpit ps
-scripts/compose.sh dev-mailpit logs app
-scripts/compose.sh dev-mailpit logs mailpit
-scripts/compose.sh dev-mailpit rebuild-app
+docker compose -f docker-compose.dev.yml -f docker-compose.infra.yml ps
+docker compose -f docker-compose.dev.yml -f docker-compose.infra.yml logs app mailpit
 ```
 
 ## 호스트에서 임시 백엔드 실행
@@ -156,7 +132,7 @@ dev JVM 실행에는 Firebase 자격 증명 파일이 필요하지 않습니다.
 공유 Compose 모드를 종료하기 전에 다른 개발 작업에서 해당 프로젝트를 사용하는지 확인합니다.
 
 ```bash
-scripts/compose.sh dev-mailpit down
+docker compose -f docker-compose.dev.yml -f docker-compose.infra.yml down
 ```
 
 독립 실행 검증에서는 `Ctrl-C`로 임시 JVM만 종료합니다. 이번 테스트에서 시작한 Mailpit 컨테이너만 중지합니다. 데이터베이스와 Redis, MinIO 볼륨은 제거하지 않습니다. 기존 받은 편지함은 비우지 않습니다. 무관한 Compose 프로젝트는 중지하지 않습니다.
