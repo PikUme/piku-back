@@ -24,11 +24,9 @@ import com.pikume.back.user.application.dto.UpdateProfileResult;
 import com.pikume.back.user.application.exception.ProfileImageNotFoundException;
 import com.pikume.back.user.application.exception.UserErrorCode;
 import com.pikume.back.user.application.exception.UserNotFoundException;
-import com.pikume.back.user.adapter.out.memory.InMemoryNicknameHoldAdapter;
 import com.pikume.back.user.domain.User;
 import com.pikume.back.user.domain.exception.InvalidNicknameException;
 import com.pikume.back.user.domain.exception.NicknameAlreadyExistsException;
-import com.pikume.back.user.domain.service.NicknamePolicy;
 import com.pikume.back.user.domain.vo.Nickname;
 
 import java.util.Optional;
@@ -62,8 +60,6 @@ class UserProfileCommandServiceTest {
 	private NicknameHoldPort nicknameHoldPort;
 	@Mock
 	private ResolveFixedCharacterAvatarPort fixedCharacterAvatarPort;
-	@Mock
-	private NicknamePolicy nicknamePolicy;
 	@Mock
 	private NicknameIdentityPort nicknameIdentityPort;
 
@@ -227,27 +223,27 @@ class UserProfileCommandServiceTest {
 		}
 
 		@Test
-		@DisplayName("실제 점유 어댑터가 공백 형태가 다른 예약과 변경을 같은 닉네임으로 처리한다")
-		void realHoldAdapterConnectsWhitespaceVariantReservationAndUpdate() {
+		@DisplayName("공백 형태가 다른 예약과 변경에서 같은 정규화 닉네임으로 점유 포트를 호출한다")
+		void usesNormalizedNicknameAcrossReservationAndUpdate() {
 			User user = new User("user-1", "test@test.com", "pw", "현재닉", 1L);
-			InMemoryNicknameHoldAdapter holdAdapter = new InMemoryNicknameHoldAdapter(new NicknamePolicy());
-			UserProfileCommandService integratedService = new UserProfileCommandService(
-					loadUserForProfilePort,
-					recordUserAccountPort,
-					checkUserUniquenessPort,
-					fixedCharacterAvatarPort,
-					holdAdapter,
-					nickname -> nickname.value());
+			Nickname nickname = new Nickname("새닉");
+			NicknameHoldSnapshot hold = new NicknameHoldSnapshot("새닉", "새닉", "version");
 			given(loadUserForProfilePort.loadProfileUser("user-1")).willReturn(Optional.of(user));
+			given(nicknameHoldPort.tryAcquire(eq(nickname), eq("user-1"), any(Instant.class))).willReturn(true);
+			given(nicknameHoldPort.isHeldBy(eq(nickname), eq("user-1"), any(Instant.class))).willReturn(true);
+			given(nicknameHoldPort.loadForOwner("user-1")).willReturn(Optional.of(hold));
 
-			boolean reserved = integratedService.reserveIfAvailable(" \u2003새닉\u3000 ", "user-1");
-			UpdateProfileResult result = integratedService.updateProfile(
+			boolean reserved = service.reserveIfAvailable(" \u2003새닉\u3000 ", "user-1");
+			UpdateProfileResult result = service.updateProfile(
 					new UpdateProfileCommand("user-1", "\t새닉\n", null));
 
 			assertThat(reserved).isTrue();
 			assertThat(result.success()).isTrue();
 			assertThat(result.newNickname()).isEqualTo("새닉");
-			assertThat(holdAdapter.isHeldBy(new Nickname("새닉"), "user-1", Instant.now())).isFalse();
+			then(nicknameHoldPort).should().tryAcquire(eq(nickname), eq("user-1"), any(Instant.class));
+			then(nicknameHoldPort).should().isHeldBy(eq(nickname), eq("user-1"), any(Instant.class));
+			then(recordUserAccountPort).should().updateProfileFields("user-1", "새닉", null);
+			then(nicknameHoldPort).should().releaseIfVersionMatches("user-1", hold);
 		}
 
 		@Test
