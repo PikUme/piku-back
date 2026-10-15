@@ -3,7 +3,7 @@
 - Status: Active
 - Audience: Engineers
 - Source of Truth: Yes
-- Last Reviewed: 2026-08-12
+- Last Reviewed: 2026-10-15
 
 ## 목적
 
@@ -47,7 +47,7 @@ Creative는 사용자가 시각적 표현을 원할 때 사용하는 AI 이미�
 | **Recommendation** | Working Context | Supporting | 일기 분석 메타데이터, 사용자 주제 친화도와 후보 점수 | 향후 추천 정책이 제품 차별화의 핵심으로 성장하면 전략 분류를 다시 평가해야 하는가? |
 | **Social** | Working Context | 미분류 | 친구 요청·관계, 댓글, 답글과 좋아요 | 친구 관계와 일기 반응이 하나의 언어와 모델에 속하는가? |
 | **Support** | Working Context | Supporting | 사용자 문의, 선택적 첨부 참조와 운영 알림 | 문의 답변·상태 워크플로가 추가되면 현재 단일 Aggregate 경계를 어떻게 확장할 것인가? |
-| **User** | Working Context | 미분류 | 일반 사용자 계정 생명주기, 자격 증명, 이메일 검증, 인증 유스케이스, 선택된 캐릭터 식별자, 프로필과 닉네임 점유 | 계정·인증 Application과 Security Adapter의 기술 책임이 분리되어 있는가? |
+| **User** | Working Context | 미분류 | 일반 사용자 계정 생명주기, 자격 증명, 이메일 검증, 인증 유스케이스, 선택된 캐릭터 식별자, 프로필과 닉네임 예약 | 계정·인증 Application과 Security Adapter의 기술 책임이 분리되어 있는가? |
 
 `미분류`는 중요도가 낮다는 의미가 아니라 제품 전략과 모델 근거를 대화로 더 확인해야 한다는 뜻이다. 코드 규모, 트래픽과 현재 패키지 구조만으로 전략 분류를 대신하지 않는다.
 
