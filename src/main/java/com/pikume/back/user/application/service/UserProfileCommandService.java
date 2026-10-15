@@ -3,7 +3,6 @@ package com.pikume.back.user.application.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import com.pikume.back.user.application.dto.UpdateProfileCommand;
 import com.pikume.back.user.application.dto.UpdateProfileFailureReason;
 import com.pikume.back.user.application.dto.UpdateProfileResult;
@@ -16,6 +15,8 @@ import com.pikume.back.user.application.port.out.ResolveFixedCharacterAvatarPort
 import com.pikume.back.user.application.port.out.CheckUserUniquenessPort;
 import com.pikume.back.user.application.port.out.LoadUserForProfilePort;
 import com.pikume.back.user.application.port.out.NicknameHoldPort;
+import com.pikume.back.user.application.port.out.NicknameIdentityPort;
+import com.pikume.back.user.application.dto.NicknameHoldSnapshot;
 import com.pikume.back.user.application.port.out.RecordUserAccountPort;
 import com.pikume.back.user.domain.User;
 import com.pikume.back.user.domain.vo.Nickname;
@@ -36,26 +37,35 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 	private final CheckUserUniquenessPort checkUserUniquenessPort;
 	private final ResolveFixedCharacterAvatarPort fixedCharacterAvatarPort;
 	private final NicknameHoldPort nicknameHoldPort;
+	private final NicknameIdentityPort nicknameIdentityPort;
 
 	@Override
 	public boolean reserveIfAvailable(String nickname, String userId) {
 		Nickname requestedNickname = new Nickname(nickname);
 		User user = loadUserForProfilePort.loadProfileUser(userId)
-				.orElseThrow(UserNotFoundException::new);
-		if (requestedNickname.value().equals(user.getNickname()))
-			return true;
-
-		if (checkUserUniquenessPort.isNicknameInUse(requestedNickname))
-			return false;
-
+					.orElseThrow(UserNotFoundException::new);
+		if (requestedNickname.value().equals(user.getNickname())) return true;
+		if (checkUserUniquenessPort.isNicknameInUse(requestedNickname)) return false;
 		return nicknameHoldPort.tryAcquire(requestedNickname, userId, Instant.now());
 	}
 
 	@Override
-	@Transactional
 	public UpdateProfileResult updateProfile(UpdateProfileCommand command) {
+		ProfileUpdate outcome = updateProfileWithinTransaction(command);
+		if (outcome.hold() != null) {
+			try {
+				nicknameHoldPort.releaseIfVersionMatches(command.userId(), outcome.hold());
+			} catch (RuntimeException exception) {
+				log.error("event=profile_nickname_reservation_cleanup outcome=failed userId={} errorType={}",
+						command.userId(), exception.getClass().getSimpleName());
+			}
+		}
+		return outcome.result();
+	}
+
+	private ProfileUpdate updateProfileWithinTransaction(UpdateProfileCommand command) {
 		if (command.newNickname() == null && command.characterId() == null) {
-			return UpdateProfileResult.failure(UpdateProfileFailureReason.INVALID_REQUEST, "변경할 닉네임이나 캐릭터 정보가 없습니다.", null);
+			return new ProfileUpdate(UpdateProfileResult.failure(UpdateProfileFailureReason.INVALID_REQUEST, "변경할 닉네임이나 캐릭터 정보가 없습니다.", null), null);
 		}
 		Nickname requestedNickname = command.newNickname() == null ? null : new Nickname(command.newNickname());
 
@@ -70,7 +80,7 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 				validateNicknameChange(command.userId(), requestedNickname);
 			}
 		} catch (UpdateProfileFailureException e) {
-			return UpdateProfileResult.failure(e.getReason(), e.getMessage(), oldNickname);
+			return new ProfileUpdate(UpdateProfileResult.failure(e.getReason(), e.getMessage(), oldNickname), null);
 		}
 
 		String targetAvatarReference = null;
@@ -81,31 +91,30 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 				targetCharacterId = command.characterId();
 			}
 		} catch (UpdateProfileFailureException e) {
-			return UpdateProfileResult.failure(e.getReason(), e.getMessage(), oldNickname);
+			return new ProfileUpdate(UpdateProfileResult.failure(e.getReason(), e.getMessage(), oldNickname), null);
 		}
 
 		boolean characterChanged = !targetCharacterId.equals(oldCharacterId);
 
 		if (!nicknameChanged && !characterChanged) {
-			return UpdateProfileResult.success("변경 사항이 없습니다.", oldNickname, targetAvatarReference);
+			return new ProfileUpdate(UpdateProfileResult.success("변경 사항이 없습니다.", oldNickname, targetAvatarReference), null);
 		}
 
-		if (nicknameChanged) {
-			user.changeNickname(requestedNickname);
-		}
-		if (characterChanged) {
-			user.changeCharacter(targetCharacterId);
-		}
-		recordUserAccountPort.recordUserAccount(user);
-		if (nicknameChanged) {
-			nicknameHoldPort.release(requestedNickname, command.userId());
-		}
-
-		return buildSuccessResult(nicknameChanged, characterChanged, user.getNickname(), targetAvatarReference);
+		NicknameHoldSnapshot hold = nicknameChanged
+				? nicknameHoldPort.loadForOwner(command.userId())
+						.filter(value -> value.nicknameKey().equals(nicknameIdentityPort.keyFor(requestedNickname)))
+						.orElse(null)
+				: null;
+		recordUserAccountPort.updateProfileFields(
+				user.getId(),
+				nicknameChanged ? requestedNickname.value() : null,
+				characterChanged ? targetCharacterId : null);
+		return new ProfileUpdate(
+				buildSuccessResult(nicknameChanged, characterChanged,
+					nicknameChanged ? requestedNickname.value() : oldNickname, targetAvatarReference), hold);
 	}
 
 	@Override
-	@Transactional
 	public void updateProfileImage(String userId, Long imageId) {
 		User user = loadUserForProfilePort.loadProfileUser(userId)
 				.orElseThrow(UserNotFoundException::new);
@@ -116,9 +125,10 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 					return new ProfileImageNotFoundException(imageId);
 				});
 
-		user.changeCharacter(imageId);
-		recordUserAccountPort.recordUserAccount(user);
+		recordUserAccountPort.updateProfileFields(user.getId(), null, imageId);
 	}
+
+	private record ProfileUpdate(UpdateProfileResult result, NicknameHoldSnapshot hold) {}
 
 	private void validateNicknameChange(String userId, Nickname requestedNickname) {
 		if (!nicknameHoldPort.isHeldBy(requestedNickname, userId, Instant.now())) {

@@ -4,12 +4,15 @@ import com.pikume.back.global.error.ProblemDetailFactory;
 import com.pikume.back.global.exception.GlobalExceptionHandler;
 import com.pikume.back.global.port.out.ResolveObjectUrlPort;
 import com.pikume.back.security.principal.UserPrincipal;
-import com.pikume.back.user.adapter.out.memory.InMemoryNicknameHoldAdapter;
+import com.pikume.back.user.application.dto.NicknameHoldSnapshot;
+import com.pikume.back.user.application.port.out.NicknameHoldPort;
 import com.pikume.back.user.application.port.in.QueryUserProfileUseCase;
 import com.pikume.back.user.application.port.out.CheckUserUniquenessPort;
 import com.pikume.back.user.application.port.out.LoadUserForPasswordResetPort;
 import com.pikume.back.user.application.port.out.LoadUserForProfilePort;
 import com.pikume.back.user.application.port.out.RecordUserAccountPort;
+import com.pikume.back.user.application.port.out.NicknameReservationStorePort;
+import com.pikume.back.user.application.port.out.NicknameIdentityPort;
 import com.pikume.back.user.application.port.out.ResolveFixedCharacterAvatarPort;
 import com.pikume.back.user.application.service.UserProfileCommandService;
 import com.pikume.back.user.auth.adapter.in.web.AuthController;
@@ -32,7 +35,6 @@ import com.pikume.back.user.auth.application.service.EmailVerificationService;
 import com.pikume.back.user.auth.domain.service.EmailVerificationPolicy;
 import com.pikume.back.user.domain.User;
 import com.pikume.back.user.domain.exception.NicknameAlreadyExistsException;
-import com.pikume.back.user.domain.service.NicknamePolicy;
 import com.pikume.back.user.domain.service.PasswordPolicy;
 import com.pikume.back.user.domain.vo.Nickname;
 import jakarta.validation.constraints.NotNull;
@@ -56,13 +58,17 @@ import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.method.support.ModelAndViewContainer;
 
 import java.util.HashSet;
+import java.time.Instant;
 import java.util.Optional;
 import java.time.LocalDateTime;
 import java.util.Set;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.mock;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -81,7 +87,7 @@ class NicknameWebContractTest {
 
 	private MockMvc mockMvc;
 	private TestUserAccountStore userAccountStore;
-	private InMemoryNicknameHoldAdapter nicknameHoldAdapter;
+	private NicknameHoldPort nicknameHoldPort;
 	private EmailVerificationStorePort emailVerificationStorePort;
 	private CheckSignUpCharacterSelectionPort checkSignUpCharacterSelectionPort;
 	private PasswordProtectionPort passwordProtectionPort;
@@ -91,7 +97,7 @@ class NicknameWebContractTest {
 	@BeforeEach
 	void setUp() {
 		userAccountStore = new TestUserAccountStore();
-		nicknameHoldAdapter = new InMemoryNicknameHoldAdapter(new NicknamePolicy());
+		nicknameHoldPort = mock(NicknameHoldPort.class);
 		emailVerificationStorePort = mock(EmailVerificationStorePort.class);
 		checkSignUpCharacterSelectionPort = mock(CheckSignUpCharacterSelectionPort.class);
 		passwordProtectionPort = mock(PasswordProtectionPort.class);
@@ -100,6 +106,10 @@ class NicknameWebContractTest {
 
 		QueryAllowedEmailUseCase queryAllowedEmailUseCase = mock(QueryAllowedEmailUseCase.class);
 		SignUpTransactionPort signUpTransactionPort = userAccountStore::recordUserAccount;
+		NicknameReservationStorePort reservationStore = mock(NicknameReservationStorePort.class);
+		given(reservationStore.isReservedByOther(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+				.willReturn(false);
+		given(reservationStore.load(org.mockito.ArgumentMatchers.any())).willReturn(Optional.empty());
 		AuthService authService = new AuthService(
 				mock(LoadUserForPasswordResetPort.class),
 				userAccountStore,
@@ -115,13 +125,16 @@ class NicknameWebContractTest {
 				new PasswordPolicy(),
 				emailVerificationStorePort,
 				mock(EmailVerificationOperationsAlertPort.class),
-				signUpTransactionPort);
+				signUpTransactionPort,
+				nickname -> nickname.value().toLowerCase(java.util.Locale.ROOT),
+				reservationStore);
 		UserProfileCommandService profileService = new UserProfileCommandService(
 				userAccountStore,
 				userAccountStore,
 				userAccountStore,
 				fixedCharacterAvatarPort,
-				nicknameHoldAdapter);
+				nicknameHoldPort,
+				nickname -> nickname.value());
 
 		ProblemDetailFactory problemDetailFactory = new ProblemDetailFactory();
 		AuthController authController = new AuthController(
@@ -253,6 +266,9 @@ class NicknameWebContractTest {
 		@Test
 		@DisplayName("사용 가능한 닉네임이면 기존 성공 구조를 반환한다")
 		void keepsSuccessResponseShape() throws Exception {
+			given(nicknameHoldPort.tryAcquire(eq(new Nickname("새닉")), eq(USER_ID), any(Instant.class)))
+					.willReturn(true);
+
 			mockMvc.perform(get("/api/users/nickname/availability")
 						.param("nickname", "새닉"))
 					.andExpect(status().isOk())
@@ -326,6 +342,12 @@ class NicknameWebContractTest {
 		@Test
 		@DisplayName("공백 형태가 다른 예약과 변경을 같은 닉네임으로 처리한다")
 		void usesNormalizedNicknameAcrossReservationAndUpdate() throws Exception {
+			Nickname nickname = new Nickname("새닉");
+			NicknameHoldSnapshot hold = new NicknameHoldSnapshot("새닉", "새닉", "version");
+			given(nicknameHoldPort.tryAcquire(eq(nickname), eq(USER_ID), any(Instant.class))).willReturn(true);
+			given(nicknameHoldPort.isHeldBy(eq(nickname), eq(USER_ID), any(Instant.class))).willReturn(true);
+			given(nicknameHoldPort.loadForOwner(USER_ID)).willReturn(Optional.of(hold));
+
 			mockMvc.perform(get("/api/users/nickname/availability")
 						.param("nickname", "  새닉　 "))
 					.andExpect(status().isOk())
@@ -344,12 +366,16 @@ class NicknameWebContractTest {
 					.andExpect(jsonPath("$.avatar").doesNotExist());
 
 			assertThat(userAccountStore.profileUser().getNickname()).isEqualTo("새닉");
+			then(nicknameHoldPort).should().tryAcquire(eq(nickname), eq(USER_ID), any(Instant.class));
+			then(nicknameHoldPort).should().isHeldBy(eq(nickname), eq(USER_ID), any(Instant.class));
+			then(nicknameHoldPort).should().releaseIfVersionMatches(USER_ID, hold);
 		}
 
 		@Test
 		@DisplayName("다른 사용자가 점유한 닉네임이면 기존 profile-conflict 409 구조를 반환한다")
 		void keepsHoldConflictResponseShape() throws Exception {
-			nicknameHoldAdapter.tryAcquire(new Nickname("경쟁닉"), "other-user", java.time.Instant.now());
+			given(nicknameHoldPort.isHeldBy(eq(new Nickname("경쟁닉")), eq(USER_ID), any(Instant.class)))
+					.willReturn(false);
 
 			mockMvc.perform(patch("/api/users/profile")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -370,6 +396,10 @@ class NicknameWebContractTest {
 		@Test
 		@DisplayName("예약 후 사용 중이 된 닉네임이면 기존 nickname-conflict 409 구조를 반환한다")
 		void keepsPersistenceConflictResponseShape() throws Exception {
+			Nickname nickname = new Nickname("중복닉");
+			given(nicknameHoldPort.tryAcquire(eq(nickname), eq(USER_ID), any(Instant.class))).willReturn(true);
+			given(nicknameHoldPort.isHeldBy(eq(nickname), eq(USER_ID), any(Instant.class))).willReturn(true);
+
 			mockMvc.perform(get("/api/users/nickname/availability")
 						.param("nickname", "중복닉"))
 					.andExpect(status().isOk());
@@ -455,6 +485,17 @@ class NicknameWebContractTest {
 				lastSignedUpUser = user;
 			}
 			return user;
+		}
+
+		@Override
+		public void updateProfileFields(String userId, String nickname, Long characterId) {
+			if (!USER_ID.equals(userId)) return;
+			profileUser = new User(
+					profileUser.getId(),
+					profileUser.getEmail(),
+					profileUser.getPassword(),
+					nickname == null ? profileUser.getNickname() : nickname,
+					characterId == null ? profileUser.getCharacterId() : characterId);
 		}
 
 		@Override

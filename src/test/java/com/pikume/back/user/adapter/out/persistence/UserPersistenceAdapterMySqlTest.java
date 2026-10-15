@@ -1,6 +1,14 @@
 package com.pikume.back.user.adapter.out.persistence;
 
 import com.pikume.back.user.domain.User;
+import com.pikume.back.user.application.dto.UpdateProfileCommand;
+import com.pikume.back.user.application.port.out.NicknameHoldPort;
+import com.pikume.back.user.application.port.out.NicknameIdentityPort;
+import com.pikume.back.user.application.port.out.ResolveFixedCharacterAvatarPort;
+import com.pikume.back.user.application.service.UserProfileCommandService;
+import com.pikume.back.user.adapter.out.persistence.UserAccountPersistenceAdapter;
+import com.pikume.back.user.domain.vo.Email;
+import com.pikume.back.user.domain.vo.Nickname;
 import com.pikume.back.user.domain.exception.EmailAlreadyExistsException;
 import com.pikume.back.user.domain.exception.NicknameAlreadyExistsException;
 import org.junit.jupiter.api.DisplayName;
@@ -19,6 +27,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -82,6 +92,73 @@ class UserPersistenceAdapterMySqlTest {
 				.isInstanceOf(NicknameAlreadyExistsException.class);
 
 		assertThat(countBy("email", "new@example.com")).isZero();
+	}
+
+	@Test
+	@DisplayName("Redis 닉네임 키는 실제 MySQL collation의 동등성 관계와 같다")
+	void nicknameKeyEqualityMatchesMySqlCollation() {
+		MySqlNicknameIdentityAdapter identity = new MySqlNicknameIdentityAdapter(jdbcTemplate);
+		List<String[]> pairs = List.of(
+				new String[] {"Café", "CAFE"},
+				new String[] {"é", "e\u0301"},
+				new String[] {"가", "가"},
+				new String[] {"😀Nick", "😀nick"},
+				new String[] {" name ", "name"});
+
+		for (String[] pair : pairs) {
+			Nickname first = new Nickname(pair[0]);
+			Nickname second = new Nickname(pair[1]);
+			Boolean mysqlEqual = jdbcTemplate.queryForObject("""
+					SELECT CAST(? AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_0900_ai_ci
+						= CAST(? AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_0900_ai_ci
+					""", Boolean.class, first.value(), second.value());
+			assertThat(identity.keyFor(first).equals(identity.keyFor(second))).isEqualTo(mysqlEqual);
+		}
+	}
+
+	@Test
+	@DisplayName("비밀번호 재설정은 stale 회원 값으로 최신 닉네임을 되돌리지 않는다")
+	void passwordOnlyUpdateDoesNotOverwriteNickname() {
+		User original = new User("password-reset@example.com", "old-hash", "before", 1L);
+		persist(original);
+		User staleSnapshot = userJpaRepository.findByEmail(new Email("password-reset@example.com")).orElseThrow();
+		User latest = userJpaRepository.findByEmail(new Email("password-reset@example.com")).orElseThrow();
+		latest.changeNickname(new Nickname("after"));
+		persist(latest);
+
+		new UserPersistenceAdapter(userJpaRepository).updatePasswordOnly(staleSnapshot.getId(), "new-hash");
+
+		User stored = userJpaRepository.findByEmail(new Email("password-reset@example.com")).orElseThrow();
+		assertThat(stored.getNickname()).isEqualTo("after");
+		assertThat(stored.getPassword()).isEqualTo("new-hash");
+	}
+
+	@Test
+	@DisplayName("캐릭터만 바꾸는 프로필 저장은 읽은 뒤 확정된 최신 닉네임을 덮어쓰지 않는다")
+	void characterOnlyProfileUpdateDoesNotOverwriteNicknameChangedAfterLoad() {
+		User original = new User("profile-race@example.com", "password", "before", 1L);
+		persist(original);
+		UserAccountPersistenceAdapter accounts = new UserAccountPersistenceAdapter(userJpaRepository);
+		UserPersistenceAdapter writes = new UserPersistenceAdapter(userJpaRepository);
+		ResolveFixedCharacterAvatarPort characterReference = characterId -> {
+			User latest = accounts.loadProfileUser(original.getId()).orElseThrow();
+			latest.changeNickname(new Nickname("concurrent-name"));
+			persist(latest);
+			return java.util.Optional.of("fixed-character-image");
+		};
+		UserProfileCommandService service = new UserProfileCommandService(
+				accounts,
+				writes,
+				accounts,
+				characterReference,
+				org.mockito.Mockito.mock(NicknameHoldPort.class),
+				org.mockito.Mockito.mock(NicknameIdentityPort.class));
+
+		service.updateProfile(new UpdateProfileCommand(original.getId(), null, 2L));
+
+		User stored = userJpaRepository.findById(original.getId()).orElseThrow();
+		assertThat(stored.getNickname()).isEqualTo("concurrent-name");
+		assertThat(stored.getCharacterId()).isEqualTo(2L);
 	}
 
 	private long countBy(String column, String value) {

@@ -3,7 +3,7 @@
 - Status: Active
 - Audience: Engineers
 - Source of Truth: Yes
-- Last Reviewed: 2026-08-11
+- Last Reviewed: 2026-10-15
 
 ## 목적
 
@@ -21,4 +21,4 @@
 - [Recommendation](../domain-models/recommendation.md): 일기 분석 메타데이터, 사용자 주제 친화도와 후보 점수
 - [Social](../domain-models/social.md): 친구 관계, 댓글과 좋아요
 - [Support](../domain-models/support.md): 사용자 문의, 선택적 첨부와 운영 알림
-- [User](../domain-models/user.md): 사용자 식별, 선택된 캐릭터 식별자, 프로필 관리와 닉네임 점유
+- [User](../domain-models/user.md): 사용자 식별, 선택된 캐릭터 식별자, 프로필 관리와 닉네임 예약
