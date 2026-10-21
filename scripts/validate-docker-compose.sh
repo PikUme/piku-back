@@ -29,6 +29,17 @@ compose_service_json_with_db_port() {
       config --no-env-resolution --format json "$service"
 }
 
+compose_dev_service_json() {
+  service=$1
+  shift
+
+  MAILPIT_SMTP_PORT=11025 \
+    MAILPIT_UI_PORT=18025 \
+    GOOGLE_APPLICATION_CREDENTIALS=validation-credentials.json \
+    docker compose --env-file /dev/null "$@" \
+      config --no-env-resolution --format json "$service"
+}
+
 assert_service_set() {
   label=$1
   expected_services=$2
@@ -104,11 +115,11 @@ validate_core() {
   # shellcheck disable=SC2086
   compose_config --quiet $dev_files
   # shellcheck disable=SC2086
-  assert_service_set "dev + infra" "app db minio redis" $dev_files
+  assert_service_set "dev + infra" "app db mailpit minio redis" $dev_files
   # shellcheck disable=SC2086
   assert_service_set \
     "dev + infra provision" \
-    "app db minio minio-provision redis" \
+    "app db mailpit minio minio-provision redis" \
     --profile provision $dev_files
   # shellcheck disable=SC2086
   assert_profile_set "dev + infra" "provision" $dev_files
@@ -116,6 +127,20 @@ validate_core() {
   assert_db_port "dev default DB port" "" "9915" "db" $dev_files
   # shellcheck disable=SC2086
   assert_db_port "dev custom DB port" "13306" "13306" "db" $dev_files
+
+  # shellcheck disable=SC2086
+  mailpit_service=$(compose_dev_service_json mailpit $dev_files)
+  printf '%s\n' "$mailpit_service" | python3 -c '
+import json
+import sys
+
+config = json.load(sys.stdin)
+mailpit = config.get("services", {}).get("mailpit", config.get("mailpit", config))
+assert mailpit["image"] == "axllent/mailpit:v1.31.4"
+ports = {(item["target"], item["published"], item["host_ip"]) for item in mailpit["ports"]}
+assert (1025, "11025", "127.0.0.1") in ports
+assert (8025, "18025", "127.0.0.1") in ports
+'
 
   # shellcheck disable=SC2086
   compose_config --quiet $prod_files
@@ -290,7 +315,6 @@ compose -f docker-compose.prod.yml -f docker-compose.infra.yml up -d --build" \
     "unknown action" \
     "usage:" \
     dev start
-
   rm -rf "$compose_runner_temp_dir"
   trap - EXIT HUP INT TERM
 }
