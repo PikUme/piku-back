@@ -7,6 +7,7 @@ import com.pikume.back.user.application.dto.UpdateProfileCommand;
 import com.pikume.back.user.application.dto.UpdateProfileFailureReason;
 import com.pikume.back.user.application.dto.UpdateProfileResult;
 import com.pikume.back.user.application.exception.ProfileImageNotFoundException;
+import com.pikume.back.user.application.exception.NicknameReservationConflictException;
 import com.pikume.back.user.application.exception.UpdateProfileFailureException;
 import com.pikume.back.user.application.exception.UserNotFoundException;
 import com.pikume.back.user.application.port.in.ReserveNicknameUseCase;
@@ -14,14 +15,13 @@ import com.pikume.back.user.application.port.in.UpdateUserProfileUseCase;
 import com.pikume.back.user.application.port.out.ResolveFixedCharacterAvatarPort;
 import com.pikume.back.user.application.port.out.CheckUserUniquenessPort;
 import com.pikume.back.user.application.port.out.LoadUserForProfilePort;
-import com.pikume.back.user.application.port.out.NicknameHoldPort;
+import com.pikume.back.user.application.port.out.NicknameReservationStorePort;
 import com.pikume.back.user.application.port.out.NicknameIdentityPort;
-import com.pikume.back.user.application.dto.NicknameHoldSnapshot;
+import com.pikume.back.user.application.dto.NicknameReservationResult;
 import com.pikume.back.user.application.port.out.RecordUserAccountPort;
 import com.pikume.back.user.domain.User;
 import com.pikume.back.user.domain.vo.Nickname;
 
-import java.time.Instant;
 
 /**
  * 프로필 수정 Application Service
@@ -36,7 +36,7 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 	private final RecordUserAccountPort recordUserAccountPort;
 	private final CheckUserUniquenessPort checkUserUniquenessPort;
 	private final ResolveFixedCharacterAvatarPort fixedCharacterAvatarPort;
-	private final NicknameHoldPort nicknameHoldPort;
+	private final NicknameReservationStorePort nicknameReservationStorePort;
 	private final NicknameIdentityPort nicknameIdentityPort;
 
 	@Override
@@ -46,15 +46,22 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 					.orElseThrow(UserNotFoundException::new);
 		if (requestedNickname.value().equals(user.getNickname())) return true;
 		if (checkUserUniquenessPort.isNicknameInUse(requestedNickname)) return false;
-		return nicknameHoldPort.tryAcquire(requestedNickname, userId, Instant.now());
+		try {
+			nicknameReservationStorePort.reserve(ownerKey(userId), nicknameIdentityPort.keyFor(requestedNickname),
+					requestedNickname.value());
+			return true;
+		} catch (NicknameReservationConflictException exception) {
+			return false;
+		}
 	}
 
 	@Override
 	public UpdateProfileResult updateProfile(UpdateProfileCommand command) {
 		ProfileUpdate outcome = updateProfileWithinTransaction(command);
-		if (outcome.hold() != null) {
+		if (outcome.reservation() != null) {
 			try {
-				nicknameHoldPort.releaseIfVersionMatches(command.userId(), outcome.hold());
+				nicknameReservationStorePort.releaseIfVersionMatches(ownerKey(command.userId()),
+						outcome.reservation().nicknameKey(), outcome.reservation().version());
 			} catch (RuntimeException exception) {
 				log.error("event=profile_nickname_reservation_cleanup outcome=failed userId={} errorType={}",
 						command.userId(), exception.getClass().getSimpleName());
@@ -100,8 +107,8 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 			return new ProfileUpdate(UpdateProfileResult.success("변경 사항이 없습니다.", oldNickname, targetAvatarReference), null);
 		}
 
-		NicknameHoldSnapshot hold = nicknameChanged
-				? nicknameHoldPort.loadForOwner(command.userId())
+		NicknameReservationResult reservation = nicknameChanged
+				? nicknameReservationStorePort.load(ownerKey(command.userId()))
 						.filter(value -> value.nicknameKey().equals(nicknameIdentityPort.keyFor(requestedNickname)))
 						.orElse(null)
 				: null;
@@ -111,7 +118,7 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 				characterChanged ? targetCharacterId : null);
 		return new ProfileUpdate(
 				buildSuccessResult(nicknameChanged, characterChanged,
-					nicknameChanged ? requestedNickname.value() : oldNickname, targetAvatarReference), hold);
+						nicknameChanged ? requestedNickname.value() : oldNickname, targetAvatarReference), reservation);
 	}
 
 	@Override
@@ -128,10 +135,11 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 		recordUserAccountPort.updateProfileFields(user.getId(), null, imageId);
 	}
 
-	private record ProfileUpdate(UpdateProfileResult result, NicknameHoldSnapshot hold) {}
+	private record ProfileUpdate(UpdateProfileResult result, NicknameReservationResult reservation) {}
 
 	private void validateNicknameChange(String userId, Nickname requestedNickname) {
-		if (!nicknameHoldPort.isHeldBy(requestedNickname, userId, Instant.now())) {
+		String nicknameKey = nicknameIdentityPort.keyFor(requestedNickname);
+		if (!nicknameReservationStorePort.isHeldBy(nicknameKey, ownerKey(userId))) {
 			throw new UpdateProfileFailureException(
 					UpdateProfileFailureReason.PROFILE_CONFLICT,
 					"닉네임 점유 정보가 없거나 만료되었거나 본인이 아닙니다.");
@@ -141,6 +149,10 @@ public class UserProfileCommandService implements UpdateUserProfileUseCase, Rese
 					UpdateProfileFailureReason.NICKNAME_CONFLICT,
 					"이미 사용 중인 닉네임입니다.");
 		}
+	}
+
+	private static String ownerKey(String userId) {
+		return "user:" + userId;
 	}
 
 	private String resolveFixedCharacterReference(Long characterId) {

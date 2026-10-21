@@ -4,8 +4,7 @@ import com.pikume.back.global.error.ProblemDetailFactory;
 import com.pikume.back.global.exception.GlobalExceptionHandler;
 import com.pikume.back.global.port.out.ResolveObjectUrlPort;
 import com.pikume.back.security.principal.UserPrincipal;
-import com.pikume.back.user.application.dto.NicknameHoldSnapshot;
-import com.pikume.back.user.application.port.out.NicknameHoldPort;
+import com.pikume.back.user.application.dto.NicknameReservationResult;
 import com.pikume.back.user.application.port.in.QueryUserProfileUseCase;
 import com.pikume.back.user.application.port.out.CheckUserUniquenessPort;
 import com.pikume.back.user.application.port.out.LoadUserForPasswordResetPort;
@@ -58,9 +57,8 @@ import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.method.support.ModelAndViewContainer;
 
 import java.util.HashSet;
-import java.time.Instant;
-import java.util.Optional;
 import java.time.LocalDateTime;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
 
@@ -87,7 +85,7 @@ class NicknameWebContractTest {
 
 	private MockMvc mockMvc;
 	private TestUserAccountStore userAccountStore;
-	private NicknameHoldPort nicknameHoldPort;
+	private NicknameReservationStorePort nicknameReservationStorePort;
 	private EmailVerificationStorePort emailVerificationStorePort;
 	private CheckSignUpCharacterSelectionPort checkSignUpCharacterSelectionPort;
 	private PasswordProtectionPort passwordProtectionPort;
@@ -97,7 +95,7 @@ class NicknameWebContractTest {
 	@BeforeEach
 	void setUp() {
 		userAccountStore = new TestUserAccountStore();
-		nicknameHoldPort = mock(NicknameHoldPort.class);
+		nicknameReservationStorePort = mock(NicknameReservationStorePort.class);
 		emailVerificationStorePort = mock(EmailVerificationStorePort.class);
 		checkSignUpCharacterSelectionPort = mock(CheckSignUpCharacterSelectionPort.class);
 		passwordProtectionPort = mock(PasswordProtectionPort.class);
@@ -106,7 +104,7 @@ class NicknameWebContractTest {
 
 		QueryAllowedEmailUseCase queryAllowedEmailUseCase = mock(QueryAllowedEmailUseCase.class);
 		SignUpTransactionPort signUpTransactionPort = userAccountStore::recordUserAccount;
-		NicknameReservationStorePort reservationStore = mock(NicknameReservationStorePort.class);
+		NicknameReservationStorePort reservationStore = nicknameReservationStorePort;
 		given(reservationStore.isReservedByOther(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
 				.willReturn(false);
 		given(reservationStore.load(org.mockito.ArgumentMatchers.any())).willReturn(Optional.empty());
@@ -133,7 +131,7 @@ class NicknameWebContractTest {
 				userAccountStore,
 				userAccountStore,
 				fixedCharacterAvatarPort,
-				nicknameHoldPort,
+				reservationStore,
 				nickname -> nickname.value());
 
 		ProblemDetailFactory problemDetailFactory = new ProblemDetailFactory();
@@ -266,8 +264,9 @@ class NicknameWebContractTest {
 		@Test
 		@DisplayName("사용 가능한 닉네임이면 기존 성공 구조를 반환한다")
 		void keepsSuccessResponseShape() throws Exception {
-			given(nicknameHoldPort.tryAcquire(eq(new Nickname("새닉")), eq(USER_ID), any(Instant.class)))
-					.willReturn(true);
+			given(nicknameReservationStorePort.reserve(eq("user:" + USER_ID), eq("새닉"), eq("새닉")))
+					.willReturn(new NicknameReservationResult(
+							"새닉", "새닉", "version", LocalDateTime.now().plusMinutes(10)));
 
 			mockMvc.perform(get("/api/users/nickname/availability")
 						.param("nickname", "새닉"))
@@ -342,11 +341,11 @@ class NicknameWebContractTest {
 		@Test
 		@DisplayName("공백 형태가 다른 예약과 변경을 같은 닉네임으로 처리한다")
 		void usesNormalizedNicknameAcrossReservationAndUpdate() throws Exception {
-			Nickname nickname = new Nickname("새닉");
-			NicknameHoldSnapshot hold = new NicknameHoldSnapshot("새닉", "새닉", "version");
-			given(nicknameHoldPort.tryAcquire(eq(nickname), eq(USER_ID), any(Instant.class))).willReturn(true);
-			given(nicknameHoldPort.isHeldBy(eq(nickname), eq(USER_ID), any(Instant.class))).willReturn(true);
-			given(nicknameHoldPort.loadForOwner(USER_ID)).willReturn(Optional.of(hold));
+			var hold = new NicknameReservationResult(
+					"새닉", "새닉", "version", LocalDateTime.now().plusMinutes(10));
+			given(nicknameReservationStorePort.reserve("user:" + USER_ID, "새닉", "새닉")).willReturn(hold);
+			given(nicknameReservationStorePort.isHeldBy("새닉", "user:" + USER_ID)).willReturn(true);
+			given(nicknameReservationStorePort.load("user:" + USER_ID)).willReturn(Optional.of(hold));
 
 			mockMvc.perform(get("/api/users/nickname/availability")
 						.param("nickname", "  새닉　 "))
@@ -366,16 +365,15 @@ class NicknameWebContractTest {
 					.andExpect(jsonPath("$.avatar").doesNotExist());
 
 			assertThat(userAccountStore.profileUser().getNickname()).isEqualTo("새닉");
-			then(nicknameHoldPort).should().tryAcquire(eq(nickname), eq(USER_ID), any(Instant.class));
-			then(nicknameHoldPort).should().isHeldBy(eq(nickname), eq(USER_ID), any(Instant.class));
-			then(nicknameHoldPort).should().releaseIfVersionMatches(USER_ID, hold);
+			then(nicknameReservationStorePort).should().reserve("user:" + USER_ID, "새닉", "새닉");
+			then(nicknameReservationStorePort).should().isHeldBy("새닉", "user:" + USER_ID);
+			then(nicknameReservationStorePort).should().releaseIfVersionMatches("user:" + USER_ID, "새닉", "version");
 		}
 
 		@Test
 		@DisplayName("다른 사용자가 점유한 닉네임이면 기존 profile-conflict 409 구조를 반환한다")
 		void keepsHoldConflictResponseShape() throws Exception {
-			given(nicknameHoldPort.isHeldBy(eq(new Nickname("경쟁닉")), eq(USER_ID), any(Instant.class)))
-					.willReturn(false);
+			given(nicknameReservationStorePort.isHeldBy(eq("경쟁닉"), eq("user:" + USER_ID))).willReturn(false);
 
 			mockMvc.perform(patch("/api/users/profile")
 						.contentType(MediaType.APPLICATION_JSON)
@@ -397,8 +395,10 @@ class NicknameWebContractTest {
 		@DisplayName("예약 후 사용 중이 된 닉네임이면 기존 nickname-conflict 409 구조를 반환한다")
 		void keepsPersistenceConflictResponseShape() throws Exception {
 			Nickname nickname = new Nickname("중복닉");
-			given(nicknameHoldPort.tryAcquire(eq(nickname), eq(USER_ID), any(Instant.class))).willReturn(true);
-			given(nicknameHoldPort.isHeldBy(eq(nickname), eq(USER_ID), any(Instant.class))).willReturn(true);
+			given(nicknameReservationStorePort.reserve("user:" + USER_ID, "중복닉", "중복닉"))
+					.willReturn(new NicknameReservationResult(
+							"중복닉", "중복닉", "version", LocalDateTime.now().plusMinutes(10)));
+			given(nicknameReservationStorePort.isHeldBy("중복닉", "user:" + USER_ID)).willReturn(true);
 
 			mockMvc.perform(get("/api/users/nickname/availability")
 						.param("nickname", "중복닉"))

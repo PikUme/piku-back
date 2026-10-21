@@ -2,7 +2,7 @@ package com.pikume.back.user.adapter.out.persistence;
 
 import com.pikume.back.user.domain.User;
 import com.pikume.back.user.application.dto.UpdateProfileCommand;
-import com.pikume.back.user.application.port.out.NicknameHoldPort;
+import com.pikume.back.user.application.port.out.NicknameReservationStorePort;
 import com.pikume.back.user.application.port.out.NicknameIdentityPort;
 import com.pikume.back.user.application.port.out.ResolveFixedCharacterAvatarPort;
 import com.pikume.back.user.application.service.UserProfileCommandService;
@@ -151,7 +151,7 @@ class UserPersistenceAdapterMySqlTest {
 				writes,
 				accounts,
 				characterReference,
-				org.mockito.Mockito.mock(NicknameHoldPort.class),
+				org.mockito.Mockito.mock(NicknameReservationStorePort.class),
 				org.mockito.Mockito.mock(NicknameIdentityPort.class));
 
 		service.updateProfile(new UpdateProfileCommand(original.getId(), null, 2L));

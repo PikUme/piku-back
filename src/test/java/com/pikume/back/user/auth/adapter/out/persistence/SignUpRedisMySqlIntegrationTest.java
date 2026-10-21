@@ -12,12 +12,10 @@ import com.pikume.back.user.adapter.out.persistence.UserJpaRepository;
 import com.pikume.back.user.adapter.out.persistence.UserPersistenceAdapter;
 import com.pikume.back.user.adapter.out.persistence.MySqlNicknameIdentityAdapter;
 import com.pikume.back.user.adapter.out.cache.RedisNicknameReservationAdapter;
-import com.pikume.back.user.adapter.out.cache.RedisNicknameHoldAdapter;
 import com.pikume.back.user.application.port.out.CheckUserUniquenessPort;
 import com.pikume.back.user.application.port.out.LoadUserForPasswordResetPort;
 import com.pikume.back.user.application.port.out.RecordUserAccountPort;
 import com.pikume.back.user.application.port.out.NicknameReservationStorePort;
-import com.pikume.back.user.application.port.out.NicknameHoldPort;
 import com.pikume.back.user.application.service.UserProfileCommandService;
 import com.pikume.back.user.application.port.out.ResolveFixedCharacterAvatarPort;
 import com.pikume.back.user.domain.vo.Nickname;
@@ -224,9 +222,8 @@ class SignUpRedisMySqlIntegrationTest {
 		RedisEmailVerificationAdapter proofStore = new RedisEmailVerificationAdapter(redis);
 		verifyCode(proofStore, email, "123456");
 		NicknameReservationStorePort reservations = new RedisNicknameReservationAdapter(redis);
-		NicknameHoldPort holds = new RedisNicknameHoldAdapter(reservations, new MySqlNicknameIdentityAdapter(jdbcTemplate));
 		UserProfileCommandService profile = new UserProfileCommandService(
-				accounts, userPersistence, accounts, mock(ResolveFixedCharacterAvatarPort.class), holds,
+				accounts, userPersistence, accounts, mock(ResolveFixedCharacterAvatarPort.class), reservations,
 				new MySqlNicknameIdentityAdapter(jdbcTemplate));
 		AuthService signup = authService(proofStore, mock(EmailVerificationOperationsAlertPort.class));
 		assertThat(profile.reserveIfAvailable("shared-race-name", userId)).isTrue();

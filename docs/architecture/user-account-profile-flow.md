@@ -36,7 +36,7 @@ flowchart LR
 
 - Web Adapter는 요청을 Application 유스케이스에 전달하고 성공 결과와 RFC 9457 Problem Details를 HTTP 응답으로 변환한다.
 - Application은 입력 닉네임을 `Nickname` 값 객체로 변환한 뒤 중복 확인, 예약 소유권 검증과 계정 저장을 조율한다.
-- 가입 예약은 `NicknameReservationStorePort`, 프로필 점유는 `NicknameHoldPort`를 사용한다. 프로필 점유 Adapter도 같은 예약 저장소에 위임하므로 가입과 프로필 요청이 서로의 예약을 확인한다.
+- 가입 예약과 프로필 점유는 `NicknameReservationStorePort`를 함께 사용하며 같은 예약 저장소에서 서로의 예약을 확인한다.
 - Redis Adapter는 가입과 프로필 변경이 함께 사용하는 예약 기록을 관리한다.
 - `NicknameIdentityPort`의 MySQL Adapter가 닉네임 비교 키를 만들고, 계정 저장 Adapter가 최종 닉네임 고유성을 보장한다.
 
