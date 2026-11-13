@@ -11,4 +11,10 @@ public interface RecordUserAccountPort {
 	 * 변경된 사용자 계정 상태를 기록합니다.
 	 */
 	User recordUserAccount(User user);
+
+	void updateProfileFields(String userId, String nickname, Long characterId);
+
+	default void updatePasswordOnly(String userId, String passwordHash) {
+		throw new UnsupportedOperationException("Password-only updates are not supported");
+	}
 }

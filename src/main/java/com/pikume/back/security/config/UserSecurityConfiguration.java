@@ -43,6 +43,7 @@ public class UserSecurityConfiguration {
 				"/api/auth/login",
 				"/api/auth/reissue",
 				"/api/auth/signup",
+				"/api/auth/signup/nickname-reservations",
 				"/api/auth/send-verification/sign-up",
 				"/api/auth/send-verification/password-reset",
 				"/api/auth/verify-code",

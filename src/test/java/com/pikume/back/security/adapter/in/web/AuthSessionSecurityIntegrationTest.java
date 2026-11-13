@@ -89,6 +89,18 @@ class AuthSessionSecurityIntegrationTest {
 	}
 
 	@Test
+	@DisplayName("회원가입 전 닉네임 예약은 인증 없이 공개 API 입력 검증까지 도달한다")
+	void signupNicknameReservationIsPublic() throws Exception {
+		mockMvc.perform(post("/api/auth/signup/nickname-reservations")
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("""
+						{"email":"","emailVerificationToken":"","nickname":""}
+						"""))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.status").value(400));
+	}
+
+	@Test
 	@DisplayName("GET /api/auth/me는 유효한 Bearer 토큰의 사용자 정보를 반환한다")
 	void getCurrentUserReturnsUserForBearerTokenSubjectUserId() throws Exception {
 		String userId = "session-user-id";

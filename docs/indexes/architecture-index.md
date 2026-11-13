@@ -3,7 +3,7 @@
 - Status: Active
 - Audience: Engineers
 - Source of Truth: Yes
-- Last Reviewed: 2026-08-11
+- Last Reviewed: 2026-10-14
 
 ## 목적
 
@@ -11,6 +11,7 @@
 
 ## Active Documents
 
+- [사용자 가입·프로필 처리 흐름](../architecture/user-account-profile-flow.md): 닉네임 공유 예약, 최종 저장·정리와 캐릭터 참조의 계층별 책임
 - [관리자 세션 인증 흐름](../architecture/admin-session-authentication-flow.md): 정식 로그인, 최초 온보딩, 세션 단계 전환의 백엔드 책임과 흐름
 - [Domain-Driven Design 원칙](../architecture/domain-driven-design.md): 전략·전술 모델링, Ubiquitous Language, Bounded Context와 Aggregate 원칙
 - [헥사고날 아키텍처 원칙](../architecture/hexagonal-architecture.md): inside/outside 경계, Port·Adapter와 기술 격리 원칙

@@ -1,6 +1,7 @@
 package com.pikume.back.user.adapter.out.persistence;
 
 import com.pikume.back.user.application.port.out.RecordUserAccountPort;
+import com.pikume.back.user.application.exception.UserNotFoundException;
 import com.pikume.back.user.domain.User;
 import com.pikume.back.user.domain.exception.NicknameAlreadyExistsException;
 import com.pikume.back.user.domain.exception.EmailAlreadyExistsException;
@@ -66,6 +67,13 @@ public class UserPersistenceAdapter implements RecordUserAccountPort {
 	 * @throws DataIntegrityViolationException 이메일·닉네임 중복으로 구분할 수 없는 제약 위반
 	 */
 	@Override
+	public void updatePasswordOnly(String userId, String passwordHash) {
+		if (jpaRepository.updatePasswordOnly(userId, passwordHash) == 0) {
+			throw new IllegalStateException("User disappeared during password update");
+		}
+	}
+
+	@Override
 	public User recordUserAccount(User user) {
 		try {
 			return jpaRepository.saveAndFlush(user);
@@ -76,6 +84,21 @@ public class UserPersistenceAdapter implements RecordUserAccountPort {
 			}
 			if (isEmailConstraint(constraintName)) {
 				throw new EmailAlreadyExistsException();
+			}
+			throw exception;
+		}
+	}
+
+	@Override
+	public void updateProfileFields(String userId, String nickname, Long characterId) {
+		try {
+			if (jpaRepository.updateProfileFields(userId, nickname, characterId) == 0) {
+				throw new UserNotFoundException();
+			}
+		} catch (DataIntegrityViolationException exception) {
+			String constraintName = findConstraintName(exception);
+			if (isNicknameConstraint(constraintName)) {
+				throw new NicknameAlreadyExistsException(nickname);
 			}
 			throw exception;
 		}
