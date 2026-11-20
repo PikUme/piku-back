@@ -17,3 +17,8 @@ spring:
 discord:
   webhook:
     url: "${DISCORD_WEBHOOK_URL:}"
+
+outbound-email:
+  api-key: ${OUTBOUNDEMAIL_APIKEY:}
+  from-address: ${MAIL_FROM_ADDRESS:}
+  feedback-recipient: ${FEEDBACK_RECIPIENT:}

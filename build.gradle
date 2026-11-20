@@ -66,7 +66,6 @@ dependencies {
 		exclude group: 'com.fasterxml.woodstox', module: 'woodstox-core'
 	}
 	implementation platform("software.amazon.awssdk:bom:2.25.19")
-	implementation 'org.springframework.boot:spring-boot-starter-mail'
 	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 	implementation 'org.flywaydb:flyway-core'
 	implementation 'org.flywaydb:flyway-mysql'

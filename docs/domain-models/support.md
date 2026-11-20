@@ -68,9 +68,9 @@ _Aggregate Root_
 
 - Support는 문의 내용, 제출자, 첨부 참조, 첨부 Object Key와 운영 메일 템플릿을 소유한다.
 - User는 사용자 계정과 존재 여부의 원천 모델을 소유하며 Support에는 공개 참조 계약만 제공한다.
-- Global은 바이트 저장이라는 중립 Object Storage 능력만 제공한다.
+- Global은 바이트 저장을 위한 중립 Object Storage와 공급자 중립 outbound email 전송 능력을 제공한다.
 - Multipart 변환과 HTTP 표현은 Support Web Adapter가 소유한다.
-- SMTP와 MIME 조립은 Support Email Adapter가 소유한다.
+- 문의 템플릿과 메시지 구성은 Support Email Adapter가 소유하고, 공급자별 HTTP 전송과 요청 형식 변환은 Global 메일 어댑터가 소유한다.
 - User Auth의 메일 템플릿과 Support 문의 템플릿을 공유하지 않는다.
 
 ## API 오류 표현

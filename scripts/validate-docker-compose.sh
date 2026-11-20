@@ -143,6 +143,19 @@ assert (8025, "18025", "127.0.0.1") in ports
 '
 
   # shellcheck disable=SC2086
+  dev_app_service=$(compose_dev_service_json app $dev_files)
+  printf '%s\n' "$dev_app_service" | python3 -c '
+import json
+import sys
+
+config = json.load(sys.stdin)
+app = config.get("services", {}).get("app", config.get("app", config))
+environment = app["environment"]
+assert "mailpit" in app["depends_on"]
+assert environment["MAILPIT_API_URL"] == "http://mailpit:8025/api/v1/send"
+'
+
+  # shellcheck disable=SC2086
   compose_config --quiet $prod_files
   # shellcheck disable=SC2086
   assert_service_set "prod + infra" "app minio prod-db redis" $prod_files

@@ -15,18 +15,6 @@ spring:
         generate_statistics: true
         format_sql: true
         dialect: org.hibernate.dialect.H2Dialect
-  mail:
-    host: smtp.gmail.com
-    port: 587
-    username: ${SUPPORT_EMAIL:piku@gmail.com}
-    password: ${EMAIL_PWD:abcd abcd efgh efgh}
-    properties:
-      mail:
-        smtp:
-          auth: true
-          timeout: 5000
-          starttls:
-            enable: true
   data:
     redis:
       host: localhost
@@ -57,6 +45,10 @@ storage:
 
 firebase:
   key-path: firebase-json-key.json
+
+outbound-email:
+  from-address: test@pikume.test
+  feedback-recipient: feedback@pikume.test
 
 gemini:
   api:
