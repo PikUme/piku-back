@@ -1,28 +1,27 @@
 package com.pikume.back.user.auth.adapter.out.email;
 
-import jakarta.mail.MessagingException;
-import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Component;
+import com.pikume.back.global.email.EmailAddress;
+import com.pikume.back.global.email.OutboundEmailMessage;
+import com.pikume.back.global.port.out.SendOutboundEmailPort;
 import com.pikume.back.user.auth.application.port.out.IssueVerificationEmailPort;
 import com.pikume.back.user.auth.constants.EmailConstants;
 import com.pikume.back.user.auth.application.exception.AuthErrorCode;
 import com.pikume.back.user.auth.application.exception.AuthException;
 
-import java.io.UnsupportedEncodingException;
+import java.util.List;
 import java.util.Random;
 
 @Component
 @RequiredArgsConstructor
-public class SmtpEmailAdapter implements IssueVerificationEmailPort {
+public class VerificationEmailAdapter implements IssueVerificationEmailPort {
 
-	private final JavaMailSender mailSender;
+	private final SendOutboundEmailPort emailPort;
 
-	@Value("${spring.mail.username}")
-	private String adminEmail;
+	@Value("${outbound-email.from-address}")
+	private String senderAddress;
 
 	@Override
 	public String issueVerificationEmail(String email) {
@@ -33,26 +32,17 @@ public class SmtpEmailAdapter implements IssueVerificationEmailPort {
 
 	@Override
 	public void deliverVerificationCode(String email, String code) {
-		String subject = "[PikUme] 이메일 인증";
-
+		OutboundEmailMessage message = new OutboundEmailMessage(
+				new EmailAddress(senderAddress, "PikUme | 피쿠"),
+				new EmailAddress(email, ""),
+				"[PikUme] 이메일 인증",
+				String.format(EmailConstants.AUTH_CODE_CONTENT, code),
+				List.of());
 		try {
-			MimeMessage mimeMessage = mailSender.createMimeMessage();
-			MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, "utf-8");
-
-			String htmlContent = String.format(EmailConstants.AUTH_CODE_CONTENT, code);
-
-			helper.setFrom(adminEmail, "PikUme | 피쿠");
-			helper.setTo(email);
-			helper.setSubject(subject);
-			helper.setText(htmlContent, true);
-
-			mailSender.send(mimeMessage);
-		} catch (MessagingException | UnsupportedEncodingException e) {
-			throw new AuthException(AuthErrorCode.EMAIL_SEND_FAILURE);
+			emailPort.send(message);
 		} catch (RuntimeException e) {
 			throw new AuthException(AuthErrorCode.EMAIL_SEND_FAILURE);
 		}
-
 	}
 
 	private String createVerificationCode() {

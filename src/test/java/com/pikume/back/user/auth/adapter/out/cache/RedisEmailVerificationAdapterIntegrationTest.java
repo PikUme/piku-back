@@ -104,15 +104,15 @@ class RedisEmailVerificationAdapterIntegrationTest {
 	}
 
 	@Test
-	void failedSmtpAfterAcceptedResendLeavesTheOldTokenInvalidated() {
-		String email = "smtp-failure-resend@example.com";
+	void failedEmailProviderAfterAcceptedResendLeavesTheOldTokenInvalidated() {
+		String email = "provider-failure-resend@example.com";
 		String emailKey = EmailVerificationService.hash(email);
 		verifyCode(emailKey, "111111", "verified-generation");
 		redis.delete(key(emailKey, ":send-cooldown"));
 		QueryAllowedEmailUseCase allowedEmails = Mockito.mock(QueryAllowedEmailUseCase.class);
 		BDDMockito.given(allowedEmails.isEmailAllowed(email)).willReturn(true);
 		IssueVerificationEmailPort emailSender = Mockito.mock(IssueVerificationEmailPort.class);
-		BDDMockito.willThrow(new IllegalStateException("SMTP unavailable"))
+		BDDMockito.willThrow(new IllegalStateException("Email provider unavailable"))
 				.given(emailSender).deliverVerificationCode(ArgumentMatchers.eq(email), ArgumentMatchers.anyString());
 		EmailVerificationService service = new EmailVerificationService(adapter, emailSender, allowedEmails);
 
@@ -252,14 +252,14 @@ class RedisEmailVerificationAdapterIntegrationTest {
 	}
 
 	@Test
-	void fifthAllowedSmtpFailureReturnsTheHourlyWindowDeadline() {
+	void fifthAllowedEmailProviderFailureReturnsTheHourlyWindowDeadline() {
 		String email = "fifth-failure@example.com";
 		String emailKey = EmailVerificationService.hash(email);
 		long firstSendAt = seedFourRecentSends(emailKey);
 		QueryAllowedEmailUseCase allowedEmails = Mockito.mock(QueryAllowedEmailUseCase.class);
 		BDDMockito.given(allowedEmails.isEmailAllowed(email)).willReturn(true);
 		IssueVerificationEmailPort emailSender = Mockito.mock(IssueVerificationEmailPort.class);
-		BDDMockito.willThrow(new IllegalStateException("SMTP unavailable"))
+		BDDMockito.willThrow(new IllegalStateException("Email provider unavailable"))
 				.given(emailSender).deliverVerificationCode(ArgumentMatchers.eq(email), ArgumentMatchers.anyString());
 		EmailVerificationService service = new EmailVerificationService(adapter, emailSender, allowedEmails);
 
@@ -393,13 +393,13 @@ class RedisEmailVerificationAdapterIntegrationTest {
 	}
 
 	@Test
-	void smtpFailuresForPermittedReservationsCountTowardHourlyLimit() {
+	void emailProviderFailuresForPermittedReservationsCountTowardHourlyLimit() {
 		String email = "failed-send-limit@example.com";
 		String emailKey = EmailVerificationService.hash(email);
 		QueryAllowedEmailUseCase allowedEmails = Mockito.mock(QueryAllowedEmailUseCase.class);
 		BDDMockito.given(allowedEmails.isEmailAllowed(email)).willReturn(true);
 		IssueVerificationEmailPort emailSender = Mockito.mock(IssueVerificationEmailPort.class);
-		BDDMockito.willThrow(new IllegalStateException("SMTP unavailable"))
+		BDDMockito.willThrow(new IllegalStateException("Email provider unavailable"))
 				.given(emailSender).deliverVerificationCode(ArgumentMatchers.eq(email), ArgumentMatchers.anyString());
 		EmailVerificationService service = new EmailVerificationService(adapter, emailSender, allowedEmails);
 

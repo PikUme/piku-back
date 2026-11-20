@@ -21,6 +21,12 @@ spring:
     baseline-on-migrate: true
     baseline-version: 1
     clean-disabled: false
+
+outbound-email:
+  from-address: ${MAIL_FROM_ADDRESS:signup-test@pikume.test}
+  feedback-recipient: ${FEEDBACK_RECIPIENT:feedback@pikume.test}
+  mailpit-url: ${MAILPIT_API_URL:http://127.0.0.1:8025/api/v1/send}
+
 admin:
   security:
     secure-cookies: false

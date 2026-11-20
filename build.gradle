@@ -26,6 +26,9 @@ repositories {
 // CVE-2025-55163은 Netty 4.1.124.Final 이상에서 해결된다.
 ext['netty.version'] = '4.1.124.Final'
 
+// Docker 29에서 지원하는 API 버전으로 테스트 컨테이너를 초기화한다.
+ext['testcontainers.version'] = '1.21.4'
+
 def profile = System.getenv("PROFILE") ?: "dev"
 def isProd = profile == "prod"
 
@@ -66,7 +69,6 @@ dependencies {
 		exclude group: 'com.fasterxml.woodstox', module: 'woodstox-core'
 	}
 	implementation platform("software.amazon.awssdk:bom:2.25.19")
-	implementation 'org.springframework.boot:spring-boot-starter-mail'
 	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 	implementation 'org.flywaydb:flyway-core'
 	implementation 'org.flywaydb:flyway-mysql'

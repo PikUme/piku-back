@@ -18,19 +18,6 @@ spring:
         max-page-size: 100
   jpa:
     open-in-view: false
-  mail:
-    host: ${SPRING_MAIL_HOST:smtp.gmail.com}
-    port: ${SPRING_MAIL_PORT:587}
-    username: ${SUPPORT_EMAIL:piku@gmail.com}
-    password: ${EMAIL_PWD:abcd abcd efgh efgh}
-    properties:
-      mail:
-        smtp:
-          auth: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH:true}
-          timeout: 5000
-          starttls:
-            enable: ${SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE:true}
-
 firebase:
   key-path: ${GOOGLE_APPLICATION_CREDENTIALS:firebase-json-key.json}
 

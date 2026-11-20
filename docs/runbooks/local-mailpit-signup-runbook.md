@@ -3,11 +3,11 @@
 - Status: Active
 - Audience: Engineers
 - Source of Truth: Yes
-- Last Reviewed: 2026-10-09
+- Last Reviewed: 2026-11-14
 
 ## 목적
 
-개발용 회원가입 메일을 로컬 SMTP 받은 편지함에서 확인하고 기존 Redis 기반 이메일 인증과 회원가입 API까지 점검합니다. 외부 이메일 전달과 운영 발신자 평판은 검증 범위에 포함되지 않습니다.
+개발용 회원가입 메일을 로컬 Mailpit 받은 편지함에서 확인하고, 기존 Redis 기반 이메일 인증과 회원가입 API까지 점검합니다. 개발 백엔드는 Mailpit HTTP API를 호출하며 SMTP 1025 포트는 다른 Mailpit 클라이언트용으로 유지됩니다. 외부 이메일 전달과 운영 발신자 평판은 검증 범위에 포함되지 않습니다.
 
 ## 사전 조건
 
@@ -37,7 +37,7 @@ Firebase 초기화는 prod 프로필에서만 수행합니다. dev JVM 실행에
 
 ## Compose 개발 환경에서 Mailpit 사용
 
-기본 dev 스택에는 Mailpit이 포함됩니다. Mailpit 웹 UI는 `127.0.0.1:8025`에, 호스트 SMTP는 `127.0.0.1:1025`에 기본 바인딩됩니다. 포트를 바꾸려면 `MAILPIT_UI_PORT` 또는 `MAILPIT_SMTP_PORT`를 설정합니다. 기존 개발 컨테이너와 데이터 경로를 재사용할 때는 기본 체크아웃에서 명령을 실행합니다.
+기본 dev 스택에는 Mailpit이 포함됩니다. Mailpit 웹 UI와 HTTP API는 `127.0.0.1:8025`에, 다른 Mailpit 클라이언트용 SMTP는 `127.0.0.1:1025`에 기본 바인딩됩니다. UI/API 포트를 바꾸려면 `MAILPIT_UI_PORT`를 설정합니다. SMTP 포트 매핑은 유지되므로 기존 Mailpit 클라이언트도 사용할 수 있습니다. 기존 개발 컨테이너와 데이터 경로를 재사용할 때는 기본 체크아웃에서 명령을 실행합니다.
 
 IntelliJ에서 호스트 JVM으로 앱을 실행할 때는 dev Compose 설정에서 Mailpit 서비스만 시작합니다.
 
@@ -45,9 +45,9 @@ IntelliJ에서 호스트 JVM으로 앱을 실행할 때는 dev Compose 설정에
 docker compose -f docker-compose.dev.yml up -d mailpit
 ```
 
-호스트 앱의 SMTP 호스트는 `localhost`, 포트는 기본 `1025`로 설정합니다. 포트를 바꿨다면 `SPRING_MAIL_PORT`에도 같은 호스트 포트를 지정합니다. UI는 `http://127.0.0.1:8025`에서 엽니다.
+dev 프로필의 호스트 JVM은 기본적으로 `http://127.0.0.1:8025/api/v1/send`를 사용합니다. UI는 `http://127.0.0.1:8025`에서 엽니다. UI/API 호스트 포트를 바꿨다면 `MAILPIT_API_URL`에 `http://127.0.0.1:<포트>/api/v1/send`를 지정합니다.
 
-Compose에서 실행하는 앱은 `.env` 등 Compose가 읽는 환경 설정에 SMTP 호스트 `mailpit`, 포트 `1025`, SMTP 인증 `false`, STARTTLS `false`를 지정해야 합니다. IntelliJ 호스트 JVM용 `SPRING_MAIL_*` 셸 변수는 Compose 앱 컨테이너에 전달되지 않습니다.
+Compose에서 실행하는 앱은 Compose 네트워크의 `http://mailpit:8025/api/v1/send`를 사용합니다. 호스트에 게시된 UI/API 포트를 바꿔도 컨테이너 간 포트는 `8025`입니다.
 
 ```bash
 docker compose -f docker-compose.dev.yml -f docker-compose.infra.yml down
@@ -73,7 +73,7 @@ docker run --rm --detach --name piku-local-mailpit \
   axllent/mailpit:v1.31.4
 ```
 
-포트가 사용 중이면 다른 호스트 포트를 선택하고 `SPRING_MAIL_PORT`에 SMTP 포트를 지정합니다. `--rm`으로 시작한 임시 컨테이너는 `docker stop piku-local-mailpit`으로 중지하면 제거됩니다. 기존 Supabase나 다른 Mailpit 컨테이너는 중지하지 않습니다.
+HTTP API 포트 `8025`가 사용 중이면 다른 호스트 포트를 선택하고 호스트 JVM의 `MAILPIT_API_URL`에 같은 포트를 지정합니다. `--rm`으로 시작한 임시 컨테이너는 `docker stop piku-local-mailpit`으로 중지하면 제거됩니다. 기존 Supabase나 다른 Mailpit 컨테이너는 중지하지 않습니다.
 
 백엔드 worktree에서 앱을 사용하지 않는 포트로 실행합니다. 아래 URL은 일반적인 개발 서비스 포트에 연결합니다. 저장소의 dev 설정에는 로컬 기본값이 있습니다. 데이터베이스에 별도 암호가 필요하면 이미 알고 있는 값으로 `DEV_DB_PASSWORD`를 셸에서 설정합니다. 암호를 확인하려고 로컬 비밀 파일을 열거나 출력하지 않습니다.
 
@@ -84,22 +84,16 @@ DEV_DB_URL=jdbc:mysql://localhost:9915/piku \
 REDIS_URL=redis://localhost:6379 \
 SERVER_TO_S3_URL=http://localhost:9000 \
 CLIENT_TO_S3_URL=http://localhost:9000 \
-SPRING_MAIL_HOST=localhost \
-SPRING_MAIL_PORT=1025 \
-SPRING_MAIL_USERNAME=signup-test@pikume.test \
-SPRING_MAIL_PASSWORD= \
-SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH=false \
-SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE=false \
 ./gradlew bootRun
 ```
 
-dev JVM 실행에는 Firebase 자격 증명 파일이 필요하지 않습니다. Mailpit은 SMTP 인증과 STARTTLS를 요구하지 않습니다. 메시지는 외부로 전달되지 않고 로컬에 보관됩니다.
+dev JVM 실행에는 Firebase 자격 증명 파일이 필요하지 않습니다. 메일은 Mailpit HTTP API로 보내며 외부로 전달되지 않고 로컬에 보관됩니다.
 
 ## 실제 회원가입 인증 흐름 확인
 
 실제 애플리케이션 API로 진행합니다. 테스트 전용 엔드포인트로 인증 코드나 토큰을 반환하지 않습니다.
 
-1. 허용 도메인 조회: `GET /api/auth/email-domains`. 사용 가능한 고정 캐릭터 ID 조회: `GET /api/characters/fixed`의 `fixedCharacterId`.
+1. `GET /api/auth/email-domains`에서 허용 도메인을 확인합니다. `GET /api/characters/fixed` 응답의 `id`를 가입 요청의 `fixedCharacterId`로 사용합니다.
 2. 허용 도메인의 새 테스트 이메일 주소로 인증 메일 요청.
 
    ```bash
@@ -117,7 +111,8 @@ dev JVM 실행에는 Firebase 자격 증명 파일이 필요하지 않습니다.
      -d '{"email":"signup-check@<allowed-domain>","code":"<mailpit-code>","type":"SIGN_UP"}'
    ```
 
-5. 같은 이메일 주소와 응답 토큰으로 회원가입 요청. 로컬 테스트 비밀번호와 중복되지 않는 닉네임 사용. 1단계에서 확인한 고정 캐릭터 ID 포함.
+5. `POST /api/auth/signup/nickname-reservations`에 `email`, `emailVerificationToken`, `nickname`을 보내 닉네임 예약.
+6. 같은 이메일 주소, 인증 토큰, 예약한 닉네임으로 회원가입 요청. 로컬 테스트 비밀번호와 1단계에서 확인한 고정 캐릭터 ID 포함.
 
    ```bash
    curl -i -X POST http://localhost:8080/api/auth/signup \
