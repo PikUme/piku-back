@@ -17,8 +17,8 @@ class ProductionMailStartupValidator {
 	@PostConstruct
 	void validate() {
 		requireSetting("outbound-email.api-key");
-		requireSetting("MAIL_FROM_ADDRESS");
-		requireSetting("FEEDBACK_RECIPIENT");
+		requireSetting("outbound-email.from-address");
+		requireSetting("outbound-email.feedback-recipient");
 	}
 
 	private void requireSetting(String property) {

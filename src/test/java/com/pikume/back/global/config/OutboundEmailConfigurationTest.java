@@ -11,6 +11,7 @@ import org.springframework.boot.context.properties.source.ConfigurationPropertyS
 import org.springframework.boot.env.YamlPropertySourceLoader;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.core.env.ConfigurableEnvironment;
+import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.SystemEnvironmentPropertySource;
 import org.springframework.core.io.FileSystemResource;
 
@@ -57,13 +58,16 @@ class OutboundEmailConfigurationTest {
 	}
 
 	@ParameterizedTest
-	@ValueSource(strings = {"outbound-email.api-key", "MAIL_FROM_ADDRESS", "FEEDBACK_RECIPIENT"})
+	@ValueSource(strings = {
+			"outbound-email.api-key",
+			"outbound-email.from-address",
+			"outbound-email.feedback-recipient"
+	})
 	@DisplayName("필수 운영 메일 설정이 비어 있으면 시작하지 않는다")
 	void productionRejectsBlankSettings(String setting) {
-		ApplicationContextRunner runner = setting.equals("outbound-email.api-key")
-				? productionRunnerWithoutApiKey("prod")
-				: productionRunner("prod");
-		runner.withPropertyValues(setting + "=").run(context -> assertThat(context)
+		productionRunner("prod")
+				.withInitializer(context -> addCanonicalSetting(context.getEnvironment(), setting, ""))
+				.run(context -> assertThat(context)
 				.hasFailed()
 				.getFailure()
 				.hasRootCauseMessage(setting + " 운영 메일 설정은 필수입니다."));
@@ -77,16 +81,35 @@ class OutboundEmailConfigurationTest {
 						"FEEDBACK_RECIPIENT=feedback@pikume.test");
 	}
 
-	private ApplicationContextRunner productionRunnerWithoutApiKey(String... profiles) {
-		return contextRunner(profiles).withPropertyValues(
-				"MAIL_FROM_ADDRESS=sender@pikume.test",
-				"FEEDBACK_RECIPIENT=feedback@pikume.test");
+	@Test
+	@DisplayName("운영 검증은 환경변수 별칭 없이 canonical 메일 설정을 허용한다")
+	void productionAcceptsCanonicalSettingsWithoutAliases() {
+		contextRunner("prod")
+				.withInitializer(context -> addCanonicalSettingsWithoutAliases(context.getEnvironment()))
+				.run(context -> {
+					assertThat(context).hasNotFailed();
+					assertThat(context.getEnvironment().getProperty("MAIL_FROM_ADDRESS")).isNull();
+					assertThat(context.getEnvironment().getProperty("FEEDBACK_RECIPIENT")).isNull();
+				});
 	}
 
 	private void addResendSystemEnvironmentVariable(ConfigurableEnvironment environment) {
-		environment.getPropertySources().addFirst(new SystemEnvironmentPropertySource(
-				"systemEnvironment", Map.of("OUTBOUNDEMAIL_APIKEY", "test-resend-key")));
+		environment.getPropertySources().addAfter("systemProperties", new SystemEnvironmentPropertySource(
+				"test-systemEnvironment", Map.of("OUTBOUNDEMAIL_APIKEY", "test-resend-key")));
 		ConfigurationPropertySources.attach(environment);
+	}
+
+	private void addCanonicalSetting(ConfigurableEnvironment environment, String property, String value) {
+		environment.getPropertySources().addFirst(new MapPropertySource(
+				"canonicalOverride", Map.of(property, value)));
+	}
+
+	private void addCanonicalSettingsWithoutAliases(ConfigurableEnvironment environment) {
+		environment.getPropertySources().remove("systemEnvironment");
+		environment.getPropertySources().addFirst(new MapPropertySource("canonicalSettings", Map.of(
+				"outbound-email.api-key", "test-resend-key",
+				"outbound-email.from-address", "sender@pikume.test",
+				"outbound-email.feedback-recipient", "feedback@pikume.test")));
 	}
 
 	private ApplicationContextRunner contextRunner(String... profiles) {
